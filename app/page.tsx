@@ -1,8 +1,9 @@
 "use client";
 
 import { Suspense, useEffect, useState } from "react";
+import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
-import { Moon, Grid3x3, ArrowLeft, DoorOpen, KeyRound, Zap, Anchor } from "lucide-react";
+import { Moon, Grid3x3, ArrowLeft, DoorOpen, KeyRound, Zap, Anchor, BookOpen } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -44,9 +45,13 @@ function HomePageInner() {
 
   useEffect(() => {
     const prefill = searchParams.get("code");
+    const game = searchParams.get("game");
     if (prefill) {
       setJoinCode(prefill.toUpperCase());
       setStep("join");
+    } else if (game && GAME_IDS.includes(game as GameType)) {
+      setGameType(game as GameType);
+      setStep("create");
     }
   }, [searchParams]);
 
@@ -150,6 +155,16 @@ function HomePageInner() {
                   <p className="text-moon-400 text-xs">{t("home.joinRoomDesc")}</p>
                 </div>
               </button>
+              <Link
+                href="/games"
+                className="w-full flex items-center gap-4 rounded-lg border border-wolf-purple/30 bg-night-900/60 p-4 text-left transition-all hover:border-crimson-500 hover:bg-night-700"
+              >
+                <BookOpen className="w-6 h-6 text-moon-300 shrink-0" />
+                <div>
+                  <p className="text-moon-200 font-medium">{t("guide.link")}</p>
+                  <p className="text-moon-400 text-xs">{t("guide.linkDesc")}</p>
+                </div>
+              </Link>
             </CardContent>
           </Card>
         )}

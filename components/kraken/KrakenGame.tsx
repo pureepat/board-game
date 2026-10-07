@@ -1,41 +1,124 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import type { Socket } from "socket.io-client";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
-import { Badge } from "@/components/ui/badge";
 import { ChatBox } from "@/components/game/ChatBox";
 import { cn } from "@/lib/utils";
-import { Anchor, Check, Crown, Skull, Waves, X } from "lucide-react";
-import type { KrakenCard, KrakenHistoryEntry, KrakenPlayer, KrakenRoomState } from "@/types/game";
-import { KRAKEN_CARD_META, KRAKEN_ROLE_META } from "@/components/kraken/krakenMeta";
+import { ArrowLeft, ArrowRight, ArrowUp, Compass, Crown, FileText, Hand, MicOff, Moon, Skull, Star, Waves, WifiOff } from "lucide-react";
+import type { KrakenEvent, KrakenGameState, KrakenNavCard, KrakenPlayer, KrakenPrivateNote } from "@/types/game";
+import { KrakenBoard } from "@/components/kraken/KrakenBoard";
+import { KR_EFFECT_ICON, KR_GUN_ICON, KR_HEX, KR_TEAM_HEX, KRAKEN_ROLE_META } from "@/components/kraken/krakenMeta";
 import { useTranslation } from "@/lib/i18n/useTranslation";
 
-export function KrakenGame({ room, socket }: { room: KrakenRoomState; socket: Socket }) {
+type T = ReturnType<typeof useTranslation>["t"];
+
+const WOOD = {
+  background:
+    "repeating-linear-gradient(92deg, rgba(0,0,0,0.06) 0 2px, transparent 2px 14px), radial-gradient(ellipse at center, #6b4426 0%, #4a2d18 60%, #2e1b0e 100%)",
+};
+
+// Muted portrait colors, picked by nickname so a player keeps the same color all game.
+const PORTRAIT_COLORS = ["#8e5c3a", "#4f6d7a", "#7a5c8e", "#5c7a4f", "#8e4f4f", "#4f5c8e", "#8e7a4f", "#3f7a72"];
+function portraitColor(name: string) {
+  let h = 0;
+  for (const ch of name) h = (h * 31 + ch.charCodeAt(0)) >>> 0;
+  return PORTRAIT_COLORS[h % PORTRAIT_COLORS.length];
+}
+
+const DIR_ICON = { RED: ArrowLeft, BLUE: ArrowRight, YELLOW: ArrowUp };
+
+// What tapping a seat does depends on the phase and who you are.
+type SelectMode =
+  | { kind: "none" }
+  | { kind: "appoint"; allowed: string[] }
+  | { kind: "single"; allowed: string[] }
+  | { kind: "guns"; allowed: string[] };
+
+function selectModeFor(room: KrakenGameState): SelectMode {
+  const you = room.you;
+  if (!you || you.eliminated) return { kind: "none" };
+  const alive = room.players.filter((p) => !p.eliminated).map((p) => p.id);
+  if (room.phase === "KR_APPOINT" && you.isCaptain) return { kind: "appoint", allowed: room.appointable ?? [] };
+  if (room.phase === "KR_ACTION" && you.isCaptain) return { kind: "single", allowed: alive.filter((id) => id !== you.id) };
+  if (room.phase === "KR_RITUAL" && you.isCultLeader) {
+    if (room.pending?.ritual === "CONVERSION") return { kind: "single", allowed: room.conversionTargets ?? [] };
+    if (room.pending?.ritual === "GUN_STASH") return { kind: "guns", allowed: alive };
+  }
+  return { kind: "none" };
+}
+
+export function KrakenGame({ room, socket }: { room: KrakenGameState; socket: Socket }) {
   const { t } = useTranslation();
-  const captain = room.players.find((p) => p.id === room.captainId);
+  const [sel, setSel] = useState<string[]>([]);
+  const mode = selectModeFor(room);
+
+  // Any change of phase, round or pending step starts a fresh selection.
+  const stepKey = `${room.phase}|${room.round}|${room.events.length}`;
+  useEffect(() => setSel([]), [stepKey]);
+
+  function tap(id: string) {
+    if (mode.kind === "none" || !mode.allowed.includes(id)) return;
+    if (mode.kind === "guns") return setSel((cur) => (cur.length < 3 ? [...cur, id] : cur));
+    const max = mode.kind === "appoint" ? 2 : 1;
+    setSel((cur) => (cur.includes(id) ? cur.filter((x) => x !== id) : cur.length < max ? [...cur, id] : max === 1 ? [id] : cur));
+  }
+
+  // Seat everyone else clockwise from your left: left column (bottom→top),
+  // across the top, then down the right. You sit at the bottom, by your hand.
+  const selfIdx = room.players.findIndex((p) => p.isSelf);
+  const others = [...room.players.slice(selfIdx + 1), ...room.players.slice(0, Math.max(0, selfIdx))].filter((p) => !p.isSelf);
+  const side = Math.min(2, Math.floor(others.length / 3));
+  const left = others.slice(0, side).reverse();
+  const top = others.slice(side, others.length - side);
+  const right = others.slice(others.length - side);
+  const self = room.players.find((p) => p.isSelf);
+
+  const seat = (p: KrakenPlayer) => <Seat key={p.id} room={room} player={p} mode={mode} sel={sel} onTap={() => tap(p.id)} />;
+  const silenced = Boolean(room.you?.eliminated || self?.tongueless);
 
   return (
-    <div className="grid md:grid-cols-2 gap-4">
-      <div className="space-y-4">
-        <StatusCard room={room} captainName={captain?.nickname ?? "?"} />
-        <YourRoleCard room={room} />
-        {room.phase === "CREW_SELECT" && <CrewSelect room={room} socket={socket} captainName={captain?.nickname ?? "?"} />}
-        {room.phase === "CREW_VOTE" && <CrewVote room={room} socket={socket} />}
-        {room.phase === "VOYAGE" && <Voyage room={room} socket={socket} />}
-        {room.phase === "VOYAGE_RESULT" && <VoyageResult room={room} socket={socket} />}
-        {room.you?.isHost && room.phase !== "VOYAGE_RESULT" && (
-          <div className="text-center">
-            <Button variant="outline" size="sm" onClick={() => socket.emit("kraken_force_advance")}>
-              {t("kraken.host.forceAdvance")}
-            </Button>
-            <p className="text-moon-400/60 text-[11px] mt-1">{t("kraken.host.forceHint")}</p>
+    <div className="space-y-4">
+      <div className="rounded-2xl p-3 md:p-5 shadow-[inset_0_0_60px_rgba(0,0,0,0.6)] border-4 border-[#2b1d12]" style={WOOD}>
+        {/* Phones: everyone else in one wrapped row. md+: seated around the board. */}
+        <div className="md:hidden flex flex-wrap justify-center gap-2 mb-3">{others.map(seat)}</div>
+        <div className="hidden md:flex flex-wrap justify-center gap-2 mb-3">{top.map(seat)}</div>
+
+        <div className="grid grid-cols-1 md:grid-cols-[128px_minmax(0,1fr)_128px] gap-3 items-center">
+          <div className="hidden md:flex flex-col justify-center items-center gap-2">{left.map(seat)}</div>
+          <div className="mx-auto w-full max-w-[460px]">
+            <KrakenBoard room={room} />
+            <DeckStrip room={room} />
           </div>
-        )}
+          <div className="hidden md:flex flex-col justify-center items-center gap-2">{right.map(seat)}</div>
+        </div>
+
+        <PhaseBanner room={room} />
+
+        <div className="mt-4 flex flex-col md:flex-row items-center md:items-end justify-center gap-4 rounded-xl bg-black/25 p-3 md:p-4">
+          <div className="flex items-end gap-3">
+            {self && <Seat room={room} player={self} mode={mode} sel={sel} onTap={() => tap(self.id)} />}
+            {room.you?.role && <RoleCard room={room} />}
+          </div>
+          <div className="flex flex-col items-center gap-2 md:min-w-[300px]">
+            <p className="text-[11px] uppercase tracking-widest text-[#c9a86a]">{t("kraken.board.yourHand")}</p>
+            <HandActions room={room} socket={socket} mode={mode} sel={sel} onReset={() => setSel([])} />
+            {room.you?.isHost && (
+              <button
+                type="button"
+                onClick={() => socket.emit("kraken_force_advance")}
+                title={t("kraken.host.forceHint")}
+                className="text-[11px] text-[#c9a86a]/80 underline-offset-2 hover:underline"
+              >
+                {t("kraken.host.forceAdvance")}
+              </button>
+            )}
+          </div>
+        </div>
       </div>
 
-      <div className="space-y-4">
+      <div className="grid md:grid-cols-2 gap-4">
         <Card>
           <CardHeader>
             <CardTitle>{t("kraken.chat.title")}</CardTitle>
@@ -44,377 +127,532 @@ export function KrakenGame({ room, socket }: { room: KrakenRoomState; socket: So
             <ChatBox
               messages={room.chat}
               onSend={(text) => socket.emit("kraken_chat_message", { text })}
-              placeholder={t("kraken.chat.placeholder")}
+              placeholder={silenced ? t("kraken.chat.silenced") : t("kraken.chat.placeholder")}
+              disabled={silenced}
             />
           </CardContent>
         </Card>
-        <HistoryCard history={room.history} />
-      </div>
-    </div>
-  );
-}
-
-function Track({ label, value, max, color }: { label: string; value: number; max: number; color: string }) {
-  return (
-    <div>
-      <div className="flex justify-between text-xs text-moon-300 mb-1">
-        <span>{label}</span>
-        <span className="tabular-nums">
-          {value} / {max}
-        </span>
-      </div>
-      <div className="flex gap-1">
-        {Array.from({ length: max }).map((_, i) => (
-          <div key={i} className={cn("h-2 flex-1 rounded-full bg-night-700", i < value && color)} />
-        ))}
-      </div>
-    </div>
-  );
-}
-
-function StatusCard({ room, captainName }: { room: KrakenRoomState; captainName: string }) {
-  const { t } = useTranslation();
-  return (
-    <Card className="animate-fade-in">
-      <CardHeader className="flex flex-row items-center justify-between">
-        <CardTitle className="flex items-center gap-2">
-          <Anchor className="w-5 h-5 text-moon-300" /> {t("kraken.status.voyage", { round: room.round })}
-        </CardTitle>
-        <span className="text-xs text-moon-300 flex items-center gap-1">
-          <Crown className="w-3 h-3 text-yellow-400" /> {t("kraken.status.captain", { nickname: captainName })}
-        </span>
-      </CardHeader>
-      <CardContent className="space-y-3">
-        <Track label={t("kraken.tracks.sailors")} value={room.score.SAILORS} max={room.winScore} color="bg-emerald-500" />
-        <Track label={t("kraken.tracks.pirates")} value={room.score.PIRATES} max={room.winScore} color="bg-crimson-500" />
-        <Track label={t("kraken.tracks.kraken")} value={room.score.KRAKEN} max={room.winScore} color="bg-wolf-purple" />
-        <p className="text-xs text-moon-400">
-          {t("kraken.status.crewOf", { count: room.crewSize })} ·{" "}
-          {t("kraken.status.rejects", { count: room.rejects, max: room.maxRejects })}
-        </p>
-      </CardContent>
-    </Card>
-  );
-}
-
-function YourRoleCard({ room }: { room: KrakenRoomState }) {
-  const { t } = useTranslation();
-  const role = room.you?.role;
-  if (!role) return null;
-  const meta = KRAKEN_ROLE_META[role];
-  const Icon = meta.icon;
-  const fellowPirates = role === "PIRATE" ? room.players.filter((p) => p.role === "PIRATE" && !p.isSelf) : [];
-
-  return (
-    <Card>
-      <CardContent className="py-4 flex items-start gap-3">
-        <Icon className={cn("w-8 h-8 shrink-0", meta.color)} />
-        <div>
-          <p className="text-xs text-moon-400">{t("kraken.status.yourAllegiance")}</p>
-          <p className={cn("font-display text-lg", meta.color)}>{t(`kraken.roles.${role}.label`)}</p>
-          <p className="text-moon-300 text-sm">{t(`kraken.roles.${role}.desc`)}</p>
-          {role === "PIRATE" && (
-            <p className="text-crimson-400 text-sm mt-1">
-              {fellowPirates.length > 0
-                ? t("kraken.status.fellowPirates", { names: fellowPirates.map((p) => p.nickname).join(", ") })
-                : t("kraken.status.lonePirate")}
-            </p>
-          )}
+        <div className="space-y-4">
+          <SecretsCard notes={room.you?.privateLog ?? []} />
+          <LogCard events={room.events} />
         </div>
-      </CardContent>
-    </Card>
+      </div>
+    </div>
   );
 }
 
-function PlayerChip({
+// --- Seats ------------------------------------------------------------------
+
+function Seat({
+  room,
   player,
-  selectable = false,
-  selected = false,
-  badge,
-  onClick,
+  mode,
+  sel,
+  onTap,
 }: {
+  room: KrakenGameState;
   player: KrakenPlayer;
-  selectable?: boolean;
-  selected?: boolean;
-  badge?: React.ReactNode;
-  onClick?: () => void;
+  mode: SelectMode;
+  sel: string[];
+  onTap: () => void;
 }) {
   const { t } = useTranslation();
+  const selectable = mode.kind !== "none" && mode.allowed.includes(player.id);
+  const selected = sel.includes(player.id);
+  const waiting =
+    (room.phase === "KR_MUTINY" && room.mutiny && !player.isCaptain && !player.eliminated && !room.mutiny.committedIds.includes(player.id)) ||
+    ((room.phase === "KR_NAV_DISCARD" || room.phase === "KR_NAV_CHOOSE") && room.nav?.waitingIds.includes(player.id));
+  const showRole = player.role && (!player.isSelf || room.phase === "GAME_OVER");
+
+  // Preview of the officer you're about to appoint / guns you're about to hand out.
+  let preview: string | null = null;
+  if (mode.kind === "appoint" && selected) preview = sel[0] === player.id ? t("kraken.board.lieutenant") : t("kraken.board.navigator");
+  if (mode.kind === "guns" && selected) preview = `+${sel.filter((x) => x === player.id).length}`;
+
   return (
     <button
+      type="button"
       disabled={!selectable}
-      onClick={onClick}
+      onClick={onTap}
       className={cn(
-        "flex flex-col items-start gap-1 rounded-lg border p-3 text-left transition-all",
-        "border-wolf-purple/20 bg-night-900/60",
-        selectable && "hover:border-crimson-500 hover:bg-night-700 cursor-pointer",
-        selected && "border-crimson-500 bg-crimson-600/20 ring-1 ring-crimson-500",
-        !selectable && "cursor-default"
+        "relative w-[100px] sm:w-[116px] rounded-lg border-2 border-[#8a6d3b] bg-[#efe2c2] px-2 pt-2 pb-1.5 text-[#2b1d12] shadow-md shadow-black/40 transition-all",
+        selectable ? "cursor-pointer hover:-translate-y-1 hover:shadow-lg ring-2 ring-[#ffd166]/60" : "cursor-default",
+        selected && "ring-4 ring-sky-400 -translate-y-1",
+        player.eliminated && "grayscale opacity-60",
+        !player.connected && "opacity-50"
       )}
     >
-      <span className="flex w-full items-center justify-between gap-1">
-        <span className="truncate text-sm font-medium text-moon-200">
-          {player.nickname}
-          {player.isSelf && <span className="text-moon-400 text-xs"> ({t("common.you")})</span>}
-        </span>
-        {player.isCaptain && <Crown className="w-3 h-3 text-yellow-400 shrink-0" />}
+      {/* Officer standees */}
+      <span className="absolute -top-3 -right-2 flex gap-0.5">
+        {player.isCaptain && <Standee icon={Crown} color="text-yellow-400" title={t("kraken.board.captain")} />}
+        {player.isLieutenant && <Standee icon={Star} color="text-slate-200" title={t("kraken.board.lieutenant")} />}
+        {player.isNavigator && <Standee icon={Compass} color="text-amber-300" title={t("kraken.board.navigator")} />}
       </span>
-      {player.role === "PIRATE" && !player.isSelf && (
-        <Badge variant="werewolf">{t("kraken.roles.PIRATE.label")}</Badge>
+      {player.offDuty && !player.eliminated && (
+        <span
+          title={t("kraken.board.offDuty")}
+          className="absolute -top-2.5 -left-2 flex h-6 w-6 items-center justify-center rounded-full border border-[#c9a86a] bg-[#3b2a1a]"
+        >
+          <Moon className="h-3.5 w-3.5 text-[#c9a86a]" />
+        </span>
       )}
-      {badge}
+
+      <div
+        className="relative mx-auto mb-1 flex h-10 w-10 items-center justify-center rounded-full border-2 border-[#8a6d3b] font-display text-lg text-[#f3e7c9]"
+        style={{ background: portraitColor(player.nickname) }}
+      >
+        {player.nickname.slice(0, 1).toUpperCase()}
+        {player.eliminated && <Skull className="absolute h-6 w-6 text-white/90" />}
+        {waiting && <span className="absolute -bottom-1 -right-1 h-3 w-3 rounded-full bg-amber-400 animate-pulse" />}
+      </div>
+      <p className="truncate text-center text-xs font-semibold">
+        {player.nickname}
+        {player.isSelf && <span className="font-normal opacity-70"> ({t("common.you")})</span>}
+      </p>
+
+      <div className="mt-1 flex items-center justify-center gap-2 text-[10px] font-semibold">
+        <span title={t("kraken.board.guns")} className="flex items-center gap-0.5">
+          <KR_GUN_ICON className="h-3 w-3" /> {player.guns}
+        </span>
+        <span title={t("kraken.board.resumes")} className="flex items-center gap-0.5">
+          <FileText className="h-3 w-3" /> {player.resumes}
+        </span>
+        {player.tongueless && <MicOff className="h-3 w-3 text-[#c0392b]" />}
+        {!player.connected && <WifiOff className="h-3 w-3" />}
+      </div>
+
+      <div className="mt-1 flex min-h-[16px] flex-wrap items-center justify-center gap-1">
+        {showRole && player.role && (
+          <span className="rounded px-1.5 py-0.5 text-[9px] font-bold text-white" style={{ background: KRAKEN_ROLE_META[player.role].hex }}>
+            {t(`kraken.roles.${player.role}.label`)}
+          </span>
+        )}
+        {player.notTeams.map((team) => (
+          <span
+            key={team}
+            className="rounded border px-1 text-[9px] font-semibold line-through"
+            style={{ borderColor: KR_TEAM_HEX[team], color: KR_TEAM_HEX[team] }}
+          >
+            {t(`kraken.teams.${team}`)}
+          </span>
+        ))}
+        {preview && <span className="rounded bg-sky-600 px-1.5 py-0.5 text-[9px] font-bold text-white">{preview}</span>}
+      </div>
     </button>
   );
 }
 
-function CrewSelect({ room, socket, captainName }: { room: KrakenRoomState; socket: Socket; captainName: string }) {
-  const { t } = useTranslation();
-  const [picked, setPicked] = useState<string[]>([]);
-  const isCaptain = room.you?.isCaptain;
+function Standee({ icon: Icon, color, title }: { icon: any; color: string; title: string }) {
+  return (
+    <span title={title} className="flex h-7 w-7 items-center justify-center rounded-full border-2 border-[#c9a86a] bg-[#2b1d12] shadow">
+      <Icon className={cn("h-3.5 w-3.5", color)} />
+    </span>
+  );
+}
 
-  function toggle(id: string) {
-    setPicked((cur) => (cur.includes(id) ? cur.filter((x) => x !== id) : cur.length < room.crewSize ? [...cur, id] : cur));
+// --- Cards ------------------------------------------------------------------
+
+export function NavCard({
+  card,
+  size = "md",
+  selected = false,
+  onClick,
+}: {
+  card: KrakenNavCard | null;
+  size?: "sm" | "md";
+  selected?: boolean;
+  onClick?: () => void;
+}) {
+  const { t } = useTranslation();
+  const dims = size === "sm" ? "w-12 h-[72px]" : "w-24 h-36";
+
+  if (!card) {
+    return (
+      <div className={cn(dims, "rounded-lg border-2 border-[#c9a86a] bg-[#1a2a44] shadow-md shadow-black/50 flex items-center justify-center")}>
+        <Waves className={cn(size === "sm" ? "w-4 h-4" : "w-8 h-8", "text-[#c9a86a]")} />
+      </div>
+    );
   }
 
-  return (
-    <Card>
-      <CardHeader>
-        <CardTitle>
-          {isCaptain
-            ? t("kraken.select.youAreCaptain", { count: room.crewSize })
-            : t("kraken.select.waitingCaptain", { nickname: captainName })}
-        </CardTitle>
-      </CardHeader>
-      <CardContent className="space-y-3">
-        <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
-          {room.players.map((p) => (
-            <PlayerChip
-              key={p.id}
-              player={p}
-              selectable={Boolean(isCaptain)}
-              selected={isCaptain ? picked.includes(p.id) : false}
-              onClick={() => toggle(p.id)}
-            />
-          ))}
-        </div>
-        {isCaptain && (
-          <>
-            <p className="text-moon-400 text-xs">{t("kraken.select.selected", { n: picked.length, count: room.crewSize })}</p>
-            <Button
-              className="w-full"
-              disabled={picked.length !== room.crewSize}
-              onClick={() => {
-                socket.emit("kraken_select_crew", { crewIds: picked });
-                setPicked([]);
-              }}
-            >
-              {t("kraken.select.propose")}
-            </Button>
-          </>
-        )}
-      </CardContent>
-    </Card>
-  );
-}
-
-function CrewVote({ room, socket }: { room: KrakenRoomState; socket: Socket }) {
-  const { t } = useTranslation();
-  const voted = room.vote?.youVoted !== null && room.vote?.youVoted !== undefined;
-  const votedIds = room.vote?.votedIds ?? [];
+  const hex = KR_HEX[card.color];
+  const Dir = DIR_ICON[card.color];
+  const Effect = KR_EFFECT_ICON[card.effect];
+  const Tag = onClick ? "button" : "div";
 
   return (
-    <Card>
-      <CardHeader>
-        <CardTitle>{t("kraken.vote.title")}</CardTitle>
-      </CardHeader>
-      <CardContent className="space-y-3">
-        <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
-          {room.players.map((p) => (
-            <PlayerChip
-              key={p.id}
-              player={p}
-              selected={p.onCrew}
-              badge={
-                votedIds.includes(p.id) ? (
-                  <Check className="w-3 h-3 text-emerald-400" />
-                ) : undefined
-              }
-            />
-          ))}
-        </div>
-        {voted ? (
-          <p className="text-moon-300 text-sm">{t("kraken.vote.voted")}</p>
-        ) : (
-          <div className="grid grid-cols-2 gap-2">
-            <Button onClick={() => socket.emit("kraken_vote", { approve: true })}>
-              <Check className="w-4 h-4 mr-1" /> {t("kraken.vote.approve")}
-            </Button>
-            <Button variant="secondary" onClick={() => socket.emit("kraken_vote", { approve: false })}>
-              <X className="w-4 h-4 mr-1" /> {t("kraken.vote.reject")}
-            </Button>
-          </div>
-        )}
-        <p className="text-moon-400 text-xs">
-          {t("kraken.vote.votesIn", { cast: votedIds.length, total: room.players.length })}
-        </p>
-      </CardContent>
-    </Card>
-  );
-}
-
-function CardFace({ card, size = "md" }: { card: KrakenCard; size?: "sm" | "md" }) {
-  const { t } = useTranslation();
-  const meta = KRAKEN_CARD_META[card];
-  const Icon = meta.icon;
-  return (
-    <div
+    <Tag
+      type={onClick ? "button" : undefined}
+      onClick={onClick}
+      title={t(`kraken.effects.${card.effect}.desc`)}
       className={cn(
-        "flex flex-col items-center justify-center gap-1 rounded-lg border border-wolf-purple/30 bg-night-900/60",
-        size === "sm" ? "px-3 py-2" : "px-4 py-3"
+        dims,
+        "flex flex-col overflow-hidden rounded-lg border-2 bg-[#efe2c2] shadow-md shadow-black/50 transition-transform",
+        onClick && "hover:-translate-y-2 cursor-pointer",
+        selected ? "-translate-y-2 ring-4 ring-sky-400 border-sky-400" : "border-[#8a6d3b]"
       )}
     >
-      <Icon className={cn(size === "sm" ? "w-5 h-5" : "w-7 h-7", meta.color)} />
-      <span className="text-xs text-moon-200">{t(`kraken.cards.${card}.label`)}</span>
+      <div className="flex items-center justify-center" style={{ background: hex, height: size === "sm" ? 26 : 56 }}>
+        <Dir className={cn("text-white", size === "sm" ? "h-4 w-4" : "h-9 w-9")} strokeWidth={3} />
+      </div>
+      <div className="flex flex-1 flex-col items-center justify-center gap-0.5 px-1">
+        <Effect className={size === "sm" ? "h-4 w-4" : "h-6 w-6"} style={{ color: hex }} />
+        <span className={cn("text-center font-bold leading-tight text-[#2b1d12]", size === "sm" ? "text-[7px]" : "text-[11px]")}>
+          {t(`kraken.effects.${card.effect}.label`)}
+        </span>
+        {size === "md" && <span className="text-[9px] font-semibold text-[#2b1d12]/60">{t(`kraken.colors.${card.color}`)}</span>}
+      </div>
+    </Tag>
+  );
+}
+
+function DeckStrip({ room }: { room: KrakenGameState }) {
+  const { t } = useTranslation();
+  return (
+    <div className="mt-2 flex items-end justify-center gap-4 text-[10px] font-semibold text-[#f3e7c9]">
+      <div className="flex flex-col items-center gap-1">
+        <NavCard card={null} size="sm" />
+        <span>
+          {t("kraken.board.deck")} · {room.deckCount}
+        </span>
+      </div>
+      <div className="flex flex-col items-center gap-1">
+        <div className="w-12 h-[72px] rounded-lg border-2 border-dashed border-[#c9a86a]/60" />
+        <span>
+          {t("kraken.board.discard")} · {room.discardCount}
+        </span>
+      </div>
+      {room.lastCard && (
+        <div key={room.events.length} className="flex flex-col items-center gap-1 animate-card-flip">
+          <NavCard card={room.lastCard} size="sm" />
+          <span>{t("kraken.board.lastCard")}</span>
+        </div>
+      )}
     </div>
   );
 }
 
-function Voyage({ room, socket }: { room: KrakenRoomState; socket: Socket }) {
+function RoleCard({ room }: { room: KrakenGameState }) {
   const { t } = useTranslation();
-  const onCrew = room.you?.onCrew;
-  const yourCard = room.voyage?.yourCard ?? null;
-  const allowed = room.voyage?.allowedCards ?? [];
-  const crewPlayers = room.players.filter((p) => p.onCrew);
+  const role = room.you!.role!;
+  const meta = KRAKEN_ROLE_META[role];
+  const Icon = meta.icon;
+  const known = room.players.filter((p) => !p.isSelf && p.role);
 
   return (
-    <Card>
-      <CardHeader>
-        <CardTitle>{t("kraken.voyage.title")}</CardTitle>
-      </CardHeader>
-      <CardContent className="space-y-3">
-        <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
-          {crewPlayers.map((p) => (
-            <PlayerChip
-              key={p.id}
-              player={p}
-              selected
-              badge={room.voyage?.playedIds.includes(p.id) ? <Check className="w-3 h-3 text-emerald-400" /> : undefined}
-            />
-          ))}
-        </div>
-
-        {onCrew && !yourCard && (
-          <>
-            <p className="text-moon-300 text-sm">{t("kraken.voyage.onCrew")}</p>
-            <div className="grid grid-cols-3 gap-2">
-              {allowed.map((card) => {
-                const meta = KRAKEN_CARD_META[card];
-                const Icon = meta.icon;
-                return (
-                  <button
-                    key={card}
-                    onClick={() => socket.emit("kraken_play_card", { card })}
-                    className="flex flex-col items-center gap-1 rounded-lg border border-wolf-purple/30 bg-night-900/60 p-3 transition-all hover:border-crimson-500 hover:bg-night-700"
-                  >
-                    <Icon className={cn("w-7 h-7", meta.color)} />
-                    <span className="text-xs text-moon-200">{t(`kraken.cards.${card}.label`)}</span>
-                    <span className="text-[10px] text-moon-400/70 text-center">{t(`kraken.cards.${card}.desc`)}</span>
-                  </button>
-                );
-              })}
-            </div>
-          </>
+    <div className="flex w-36 flex-col overflow-hidden rounded-lg border-2 border-[#8a6d3b] bg-[#efe2c2] text-[#2b1d12] shadow-md shadow-black/50">
+      <div className="px-2 py-1 text-center text-[10px] font-bold uppercase tracking-widest text-white" style={{ background: meta.hex }}>
+        {t(`kraken.roles.${role}.label`)}
+      </div>
+      <div className="flex flex-col items-center gap-1 p-2">
+        <Icon className="h-8 w-8" style={{ color: meta.hex }} />
+        <p className="text-center text-[10px] leading-snug opacity-80">{t(`kraken.roles.${role}.desc`)}</p>
+        {known.length > 0 && (
+          <p className="text-center text-[10px] font-semibold" style={{ color: meta.hex }}>
+            {known.map((p) => `${p.nickname} (${t(`kraken.roles.${p.role}.label`)})`).join(", ")}
+          </p>
         )}
-        {onCrew && yourCard && (
-          <div className="flex items-center gap-3">
-            <CardFace card={yourCard} size="sm" />
-            <p className="text-moon-300 text-sm">{t("kraken.voyage.played")}</p>
-          </div>
-        )}
-        {!onCrew && <p className="text-moon-300 text-sm">{t("kraken.voyage.notOnCrew")}</p>}
-        <p className="text-moon-400 text-xs">
-          {t("kraken.voyage.cardsIn", { played: room.voyage?.playedIds.length ?? 0, total: crewPlayers.length })}
-        </p>
-      </CardContent>
-    </Card>
+      </div>
+    </div>
   );
 }
 
-function VoyageResult({ room, socket }: { room: KrakenRoomState; socket: Socket }) {
+// --- Instructions + hand ------------------------------------------------------
+
+function PhaseBanner({ room }: { room: KrakenGameState }) {
   const { t } = useTranslation();
-  const last = room.history[room.history.length - 1];
-  if (!last || !last.cards || !last.outcome || last.outcome === "REJECTED") return null;
-  const color =
-    last.outcome === "SAILORS" ? "text-emerald-400" : last.outcome === "PIRATES" ? "text-crimson-500" : "text-wolf-purple";
+  const name = (pred: (p: KrakenPlayer) => boolean) => room.players.find(pred)?.nickname ?? "?";
+  const captain = name((p) => p.isCaptain);
+  const you = room.you;
+  const pendingLabel =
+    room.pending?.kind === "ACTION" && room.pending.type
+      ? t(`kraken.actions.${room.pending.type}.label`)
+      : room.pending?.ritual
+      ? t(`kraken.rituals.${room.pending.ritual}.label`)
+      : "";
+
+  let text = "";
+  let sub = "";
+  switch (room.phase) {
+    case "KR_APPOINT":
+      text = you?.isCaptain ? t("kraken.phase.appointYou") : t("kraken.phase.appointWait", { captain });
+      break;
+    case "KR_MUTINY":
+      text = t("kraken.phase.mutinyTitle", { lieutenant: name((p) => p.isLieutenant), navigator: name((p) => p.isNavigator) });
+      sub = t("kraken.phase.mutinyHint", { threshold: room.threshold });
+      break;
+    case "KR_NAV_DISCARD":
+      text = room.nav?.yourHand ? t("kraken.phase.discardYou") : t("kraken.phase.discardWait");
+      sub = t("kraken.phase.noTalk");
+      break;
+    case "KR_NAV_CHOOSE":
+      text = room.nav?.yourOptions ? t("kraken.phase.chooseYou") : t("kraken.phase.chooseWait", { navigator: name((p) => p.isNavigator) });
+      sub = t("kraken.phase.noTalk");
+      break;
+    case "KR_ACTION":
+      text = you?.isCaptain
+        ? t("kraken.phase.actionYou", { action: pendingLabel })
+        : t("kraken.phase.actionWait", { captain, action: pendingLabel });
+      sub = room.pending?.type ? t(`kraken.actions.${room.pending.type}.desc`) : "";
+      break;
+    case "KR_RITUAL":
+      text = you?.isCultLeader
+        ? room.pending?.ritual === "CONVERSION"
+          ? t("kraken.phase.ritualConversion")
+          : t("kraken.phase.ritualGuns")
+        : t("kraken.phase.ritualWait", { ritual: pendingLabel });
+      break;
+  }
+  if (you?.eliminated) sub = t("kraken.phase.spectating");
+  if (!text) return null;
 
   return (
-    <Card className="animate-fade-in">
-      <CardHeader>
-        <CardTitle>{t("kraken.result.title")}</CardTitle>
-      </CardHeader>
-      <CardContent className="space-y-3">
-        <p className="text-moon-400 text-xs">{t("kraken.result.cardsRevealed")}</p>
-        <div className="flex flex-wrap gap-2">
-          {last.cards.map((c, i) => (
-            <CardFace key={i} card={c} />
-          ))}
-        </div>
-        <p className={cn("font-display text-lg", color)}>{t(`kraken.result.${last.outcome}`)}</p>
-        {room.you?.isHost ? (
-          <Button className="w-full" onClick={() => socket.emit("kraken_continue")}>
-            {t("kraken.result.next")}
-          </Button>
-        ) : (
-          <p className="text-moon-400 text-sm text-center">{t("kraken.result.waitingHost")}</p>
-        )}
-      </CardContent>
-    </Card>
+    <div className="mx-auto mt-4 max-w-2xl rounded-md border-2 border-[#8a6d3b] bg-[#efe2c2] px-4 py-2 text-center text-[#2b1d12] shadow-md shadow-black/40">
+      <p className="text-sm font-semibold">{text}</p>
+      {sub && <p className="text-[11px] opacity-75 mt-0.5">{sub}</p>}
+    </div>
   );
 }
 
-export function HistoryCard({ history }: { history: KrakenHistoryEntry[] }) {
+function HandActions({
+  room,
+  socket,
+  mode,
+  sel,
+  onReset,
+}: {
+  room: KrakenGameState;
+  socket: Socket;
+  mode: SelectMode;
+  sel: string[];
+  onReset: () => void;
+}) {
   const { t } = useTranslation();
-  const entries = [...history].reverse();
-  const names = (list: string[]) => (list.length ? list.join(", ") : t("kraken.history.none"));
+  const [cardIdx, setCardIdx] = useState<number | null>(null);
+  const stepKey = `${room.phase}|${room.round}|${room.events.length}`;
+  useEffect(() => setCardIdx(null), [stepKey]);
+  const muted = "text-sm text-[#f3e7c9]/80 text-center max-w-[260px]";
 
-  return (
-    <Card>
-      <CardHeader>
-        <CardTitle>{t("kraken.history.title")}</CardTitle>
-      </CardHeader>
-      <CardContent className="space-y-3 max-h-80 overflow-y-auto scrollbar-thin">
-        {entries.length === 0 && <p className="text-moon-400/60 text-sm italic">{t("kraken.history.empty")}</p>}
-        {entries.map((h, i) => {
-          const yes = Object.keys(h.votes).filter((n) => h.votes[n]);
-          const no = Object.keys(h.votes).filter((n) => !h.votes[n]);
-          return (
-            <div key={entries.length - i} className="rounded-lg border border-wolf-purple/20 bg-night-900/60 p-3 text-xs space-y-1">
-              <div className="flex items-center justify-between">
-                <span className="text-moon-200 font-medium">
-                  {t("kraken.history.entry", { round: h.round, captain: h.captain })}
-                </span>
-                <Badge variant={h.approved ? "villager" : "outline"}>
-                  {h.approved ? t("kraken.history.approved") : t("kraken.history.rejected")}
-                </Badge>
-              </div>
-              <p className="text-moon-300">{t("kraken.history.crew", { names: names(h.crew) })}</p>
-              <p className="text-emerald-400/80">{t("kraken.history.approvedBy", { names: names(yes) })}</p>
-              <p className="text-crimson-400/80">{t("kraken.history.rejectedBy", { names: names(no) })}</p>
-              {h.cards && h.outcome && h.outcome !== "REJECTED" && (
-                <p className="flex items-center gap-1 text-moon-300">
-                  {h.outcome === "PIRATES" ? (
-                    <Skull className="w-3 h-3 text-crimson-500" />
-                  ) : h.outcome === "KRAKEN" ? (
-                    <Waves className="w-3 h-3 text-wolf-purple" />
-                  ) : (
-                    <Anchor className="w-3 h-3 text-emerald-400" />
-                  )}
-                  {h.cards.map((c) => t(`kraken.cards.${c}.label`)).join(" · ")}
-                </p>
+  if (room.you?.eliminated) return <p className={muted}>{t("kraken.phase.spectating")}</p>;
+
+  if (room.phase === "KR_APPOINT" && mode.kind === "appoint") {
+    return (
+      <div className="flex gap-2">
+        <Button variant="secondary" size="sm" onClick={onReset} disabled={!sel.length}>
+          {t("kraken.phase.reset")}
+        </Button>
+        <Button disabled={sel.length !== 2} onClick={() => socket.emit("kr_appoint", { lieutenantId: sel[0], navigatorId: sel[1] })}>
+          {t("kraken.phase.appoint")} ({sel.length}/2)
+        </Button>
+      </div>
+    );
+  }
+
+  if (room.phase === "KR_MUTINY" && room.mutiny) {
+    const { canCommit, yourCommit, committedIds } = room.mutiny;
+    const total = room.players.filter((p) => !p.isCaptain && !p.eliminated).length;
+    if (!canCommit) return <p className={muted}>{t("kraken.phase.mutinyCaptain")}</p>;
+    if (yourCommit !== null) {
+      return (
+        <div className="flex items-center gap-3">
+          <span className="flex h-14 w-14 items-center justify-center rounded-full border-2 border-[#c9a86a] bg-[#2b1d12]">
+            <Hand className="h-7 w-7 text-[#c9a86a]" />
+          </span>
+          <p className={muted}>{t("kraken.phase.mutinyDone", { done: committedIds.length, total })}</p>
+        </div>
+      );
+    }
+    return (
+      <div className="flex flex-wrap justify-center gap-2">
+        {Array.from({ length: (room.you?.guns ?? 0) + 1 }, (_, n) => (
+          <button
+            key={n}
+            type="button"
+            onClick={() => socket.emit("kr_mutiny", { guns: n })}
+            className="flex flex-col items-center gap-1 rounded-lg border-2 border-[#8a6d3b] bg-[#efe2c2] px-3 py-2 text-[#2b1d12] shadow-md shadow-black/40 transition-transform hover:-translate-y-1"
+          >
+            <span className="flex gap-0.5">
+              {n === 0 ? (
+                <Hand className="h-5 w-5 opacity-60" />
+              ) : (
+                Array.from({ length: n }, (_, i) => <KR_GUN_ICON key={i} className="h-5 w-5 text-[#c0392b]" />)
               )}
-            </div>
-          );
-        })}
+            </span>
+            <span className="text-[11px] font-bold">{t("kraken.phase.hold", { n })}</span>
+          </button>
+        ))}
+      </div>
+    );
+  }
+
+  if (room.phase === "KR_NAV_DISCARD" || room.phase === "KR_NAV_CHOOSE") {
+    const cards = room.nav?.yourHand ?? room.nav?.yourOptions;
+    const discarding = room.phase === "KR_NAV_DISCARD";
+    if (!cards) {
+      return (
+        <p className={muted}>
+          {discarding
+            ? t("kraken.phase.discardWait")
+            : t("kraken.phase.chooseWait", { navigator: room.players.find((p) => p.isNavigator)?.nickname ?? "?" })}
+        </p>
+      );
+    }
+    return (
+      <div className="flex flex-col items-center gap-2">
+        <div className="flex gap-3">
+          {cards.map((c, i) => (
+            <NavCard key={i} card={c} selected={cardIdx === i} onClick={() => setCardIdx(i)} />
+          ))}
+        </div>
+        <Button
+          disabled={cardIdx === null}
+          variant={discarding ? "secondary" : "default"}
+          onClick={() => socket.emit(discarding ? "kr_discard" : "kr_choose", { index: cardIdx })}
+        >
+          {discarding ? `${t("kraken.board.discard")} ✕` : `${t("kraken.phase.confirm")} ➜`}
+        </Button>
+      </div>
+    );
+  }
+
+  if (room.phase === "KR_ACTION" && room.you?.isCaptain) {
+    return (
+      <Button disabled={sel.length !== 1} onClick={() => socket.emit("kr_action", { targetId: sel[0] })}>
+        {t("kraken.phase.confirm")}
+      </Button>
+    );
+  }
+
+  if (room.phase === "KR_RITUAL" && room.you?.isCultLeader) {
+    if (mode.kind === "single") {
+      return (
+        <Button disabled={sel.length !== 1} onClick={() => socket.emit("kr_ritual", { targetId: sel[0] })}>
+          {t("kraken.phase.confirm")}
+        </Button>
+      );
+    }
+    const gunsTo: Record<string, number> = {};
+    for (const id of sel) gunsTo[id] = (gunsTo[id] ?? 0) + 1;
+    return (
+      <div className="flex flex-col items-center gap-2">
+        <p className={muted}>{t("kraken.phase.gunsLeft", { left: 3 - sel.length })}</p>
+        <div className="flex gap-2">
+          <Button variant="secondary" size="sm" onClick={onReset} disabled={!sel.length}>
+            {t("kraken.phase.reset")}
+          </Button>
+          <Button onClick={() => socket.emit("kr_ritual", { gunsTo })}>{t("kraken.phase.confirm")}</Button>
+        </div>
+      </div>
+    );
+  }
+
+  return null;
+}
+
+// --- Logs -------------------------------------------------------------------
+
+function cardText(t: T, c: KrakenNavCard) {
+  return `${t(`kraken.effects.${c.effect}.label`)} (${t(`kraken.log.dirs.${c.color}`)})`;
+}
+
+export function eventText(t: T, e: KrakenEvent): string {
+  switch (e.t) {
+    case "START":
+      return t("kraken.log.START", { map: t(`kraken.lobby.maps.${e.map}`), captain: e.captain });
+    case "APPOINT":
+      return t("kraken.log.APPOINT", { captain: e.captain, lieutenant: e.lieutenant, navigator: e.navigator });
+    case "MUTINY": {
+      const head = e.success
+        ? t("kraken.log.MUTINY_SUCCESS", { total: e.total, threshold: e.threshold, captain: e.newCaptain ?? "?" })
+        : t("kraken.log.MUTINY_FAIL", { total: e.total, threshold: e.threshold });
+      const shown = Object.entries(e.commits).filter(([, n]) => n > 0);
+      return shown.length ? `${head} ${t("kraken.log.commits", { list: shown.map(([who, n]) => `${who} ${n}`).join(", ") })}` : head;
+    }
+    case "NAVIGATE":
+      return t("kraken.log.NAVIGATE", {
+        navigator: e.navigator,
+        dir: t(`kraken.log.dirs.${e.color}`),
+        effect: t(`kraken.effects.${e.effect}.label`),
+      });
+    case "GUNS":
+      return t(e.delta > 0 ? "kraken.log.GUNS_UP" : "kraken.log.GUNS_DOWN", { player: e.player });
+    case "PEEK":
+      return t("kraken.log.PEEK", { player: e.player, effect: t(`kraken.effects.${e.effect}.label`) });
+    case "RITUAL":
+      return t("kraken.log.RITUAL", { ritual: t(`kraken.rituals.${e.ritual}.label`) });
+    case "CABIN_SEARCH":
+      return t("kraken.log.CABIN_SEARCH", { captain: e.captain, target: e.target });
+    case "FLOGGING":
+      return t("kraken.log.FLOGGING", { captain: e.captain, target: e.target, team: t(`kraken.teams.${e.notTeam}`) });
+    case "TONGUE":
+      return t("kraken.log.TONGUE", { captain: e.captain, target: e.target });
+    case "FED":
+      return t("kraken.log.FED", { captain: e.captain, target: e.target });
+    case "OFF_DUTY":
+      return t("kraken.log.OFF_DUTY", { names: e.players.join(", ") || "—" });
+    case "DRUNK":
+      return t("kraken.log.DRUNK", { captain: e.captain });
+    case "SUPPLY":
+    case "RESHUFFLE":
+    case "WIN":
+      return t(`kraken.log.${e.t}`);
+  }
+}
+
+function noteText(t: T, n: KrakenPrivateNote): string {
+  const role = (r: string) => t(`kraken.roles.${r}.label`);
+  switch (n.type) {
+    case "CABIN_SEARCH":
+      return t("kraken.log.note.CABIN_SEARCH", { nickname: n.nickname, role: role(n.role) });
+    case "CULT_SEARCH":
+      return t("kraken.log.note.CULT_SEARCH", { list: n.results.map((r) => `${r.nickname}: ${role(r.role)}`).join(", ") || "—" });
+    case "MERMAID":
+      return t("kraken.log.note.MERMAID", { cards: n.cards.map((c) => cardText(t, c)).join(", ") || "—" });
+    case "TELESCOPE":
+      return n.card ? t("kraken.log.note.TELESCOPE", { card: cardText(t, n.card) }) : t("kraken.log.note.TELESCOPE_EMPTY");
+    case "CONVERTED":
+      return t("kraken.log.note.CONVERTED", { leader: n.leader });
+    case "YOU_CONVERTED":
+      return t("kraken.log.note.YOU_CONVERTED", { nickname: n.nickname });
+    case "GUNS_RECEIVED":
+      return t("kraken.log.note.GUNS_RECEIVED", { count: n.count });
+  }
+}
+
+function SecretsCard({ notes }: { notes: KrakenPrivateNote[] }) {
+  const { t } = useTranslation();
+  if (!notes.length) return null;
+  return (
+    <Card className="border-[#d4a017]/40">
+      <CardHeader>
+        <CardTitle>{t("kraken.log.secrets")}</CardTitle>
+      </CardHeader>
+      <CardContent className="space-y-1.5">
+        {[...notes].reverse().map((n, i) => (
+          <p key={notes.length - i} className="text-xs text-moon-200">
+            <span className="text-moon-400 mr-1">#{n.round}</span>
+            {noteText(t, n)}
+          </p>
+        ))}
+      </CardContent>
+    </Card>
+  );
+}
+
+export function LogCard({ events }: { events: KrakenEvent[] }) {
+  const { t } = useTranslation();
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle>{t("kraken.log.title")}</CardTitle>
+      </CardHeader>
+      <CardContent className="space-y-1.5 max-h-72 overflow-y-auto scrollbar-thin">
+        {events.length === 0 && <p className="text-moon-400/60 text-sm italic">{t("kraken.log.empty")}</p>}
+        {[...events].reverse().map((e, i) => (
+          <p key={events.length - i} className="text-xs text-moon-300">
+            <span className="text-moon-400/70 mr-1">#{e.round}</span>
+            {eventText(t, e)}
+          </p>
+        ))}
       </CardContent>
     </Card>
   );

@@ -500,43 +500,31 @@ app.prepare().then(() => {
       return room && room.gameType === GAME_TYPES.FEED_THE_KRAKEN ? room : null;
     }
 
-    socket.on("kraken_select_crew", ({ crewIds }) => {
-      const room = krakenRoom();
-      if (!room) return;
-      const { error } = kraken.selectCrew(room, socket.id, crewIds);
-      if (error) return socket.emit("error_message", error);
-      broadcastRoom(room);
-    });
-
-    socket.on("kraken_vote", ({ approve }) => {
-      const room = krakenRoom();
-      if (!room) return;
-      const { error } = kraken.castCrewVote(room, socket.id, approve);
-      if (error) return socket.emit("error_message", error);
-      broadcastRoom(room);
-    });
-
-    socket.on("kraken_play_card", ({ card }) => {
-      const room = krakenRoom();
-      if (!room) return;
-      const { error } = kraken.playCard(room, socket.id, card);
-      if (error) return socket.emit("error_message", error);
-      broadcastRoom(room);
-    });
-
-    socket.on("kraken_continue", () => {
-      const room = krakenRoom();
-      if (!room || room.hostId !== socket.id) return;
-      const { error } = kraken.continueFromResult(room);
-      if (error) return socket.emit("error_message", error);
-      broadcastRoom(room);
-    });
+    // Each action handler is the same shape: call the logic, report the
+    // error to the sender only, otherwise rebroadcast everyone's view.
+    const krakenActions = {
+      kr_appoint: (room, p) => kraken.appoint(room, socket.id, p?.lieutenantId, p?.navigatorId),
+      kr_mutiny: (room, p) => kraken.commitGuns(room, socket.id, p?.guns),
+      kr_discard: (room, p) => kraken.discardCard(room, socket.id, p?.index),
+      kr_choose: (room, p) => kraken.chooseCard(room, socket.id, p?.index),
+      kr_action: (room, p) => kraken.resolveAction(room, socket.id, p?.targetId),
+      kr_ritual: (room, p) => kraken.resolveRitual(room, socket.id, p),
+    };
+    for (const [eventName, run] of Object.entries(krakenActions)) {
+      socket.on(eventName, (payload) => {
+        const room = krakenRoom();
+        if (!room || !room.kr) return;
+        const { error } = run(room, payload) || {};
+        if (error) return socket.emit("error_message", error);
+        broadcastRoom(room);
+      });
+    }
 
     socket.on("kraken_force_advance", () => {
-      // Host-only escape hatch if the Captain / a voter / a crew member has gone AFK.
+      // Host-only escape hatch if whoever the game is waiting on has gone AFK.
       const room = krakenRoom();
-      if (!room || room.hostId !== socket.id) return;
-      const { error } = kraken.forceAdvance(room);
+      if (!room || !room.kr || room.hostId !== socket.id) return;
+      const { error } = kraken.forceAdvance(room) || {};
       if (error) return socket.emit("error_message", error);
       broadcastRoom(room);
     });
@@ -546,6 +534,9 @@ app.prepare().then(() => {
       if (!room || room.phase === PHASES.LOBBY) return;
       const player = room.players[socket.id];
       if (!player || !text || !text.trim()) return;
+      // Fed to the Kraken, or lost their tongue: silent until the game ends.
+      const silenced = room.kr && (room.kr.eliminated.includes(socket.id) || room.kr.tongueless.includes(socket.id));
+      if (silenced && room.phase !== PHASES.GAME_OVER) return;
       room.chat.push({
         id: `${Date.now()}-${Math.random()}`,
         from: socket.id,
@@ -564,16 +555,10 @@ app.prepare().then(() => {
       room.winReason = null;
       room.log = [];
       room.chat = [];
-      room.history = [];
-      room.crew = [];
-      room.crewVotes = {};
-      room.cards = {};
-      room.playerOrder = [];
-      room.round = 0;
-      room.rejects = 0;
-      room.score = { SAILORS: 0, PIRATES: 0, KRAKEN: 0 };
+      room.kr = null;
       Object.values(room.players).forEach((p) => {
         p.role = null;
+        p.alive = true;
       });
       broadcastRoom(room);
     });

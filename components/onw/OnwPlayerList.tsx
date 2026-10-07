@@ -1,11 +1,15 @@
 "use client";
 
+import { Eye } from "lucide-react";
+import type { OnwCenterCard, OnwPlayer } from "@/types/game";
+import { CampfireCircle } from "@/components/table/CampfireCircle";
+import { ONW_ROLE_META } from "@/components/onw/roleInfo";
 import { cn } from "@/lib/utils";
-import { Badge } from "@/components/ui/badge";
-import type { OnwPlayer } from "@/types/game";
-import { Crown, Skull, Wifi, WifiOff } from "lucide-react";
 import { useTranslation } from "@/lib/i18n/useTranslation";
 
+const TEAM_HEX = { WEREWOLF: "#dc2645", MINION: "#b91c4b", TANNER: "#b45309" } as Record<string, string>;
+
+/** Everyone around the campfire, with the three center cards lying face-down by the fire. */
 export function OnwPlayerList({
   players,
   selectable = false,
@@ -13,6 +17,12 @@ export function OnwPlayerList({
   selectedIds,
   onSelect,
   disabledIds = [],
+  time = "night",
+  tally,
+  center,
+  centerSelectable = false,
+  selectedCenter = [],
+  onSelectCenter,
 }: {
   players: OnwPlayer[];
   selectable?: boolean;
@@ -20,49 +30,87 @@ export function OnwPlayerList({
   selectedIds?: string[];
   onSelect?: (id: string) => void;
   disabledIds?: string[];
+  time?: "night" | "day";
+  tally?: Record<string, number>;
+  center?: OnwCenterCard[];
+  centerSelectable?: boolean;
+  selectedCenter?: number[];
+  onSelectCenter?: (index: number) => void;
+}) {
+  const { t, tp } = useTranslation();
+  return (
+    <CampfireCircle
+      time={time}
+      onSeatClick={onSelect}
+      center={
+        center?.length ? (
+          <CenterCards cards={center} selectable={centerSelectable} selected={selectedCenter} onSelect={onSelectCenter} />
+        ) : undefined
+      }
+      seats={players.map((p) => ({
+        id: p.id,
+        nickname: p.nickname,
+        isSelf: p.isSelf,
+        isHost: p.isHost,
+        connected: p.connected,
+        dead: p.dead,
+        selectable: selectable && !disabledIds.includes(p.id),
+        selected: selectedId === p.id || Boolean(selectedIds?.includes(p.id)),
+        badge: p.role ? { label: t(`onw.roles.${p.role}.label`), hex: TEAM_HEX[p.role] ?? "#047857" } : null,
+        note: tally?.[p.id]
+          ? tp("onw.voting.vote", tally[p.id])
+          : p.role && p.startingRole && p.startingRole !== p.role
+          ? t("onw.gameOver.startedAs", { role: t(`onw.roles.${p.startingRole}.label`) })
+          : null,
+      }))}
+    />
+  );
+}
+
+function CenterCards({
+  cards,
+  selectable,
+  selected,
+  onSelect,
+}: {
+  cards: OnwCenterCard[];
+  selectable: boolean;
+  selected: number[];
+  onSelect?: (index: number) => void;
 }) {
   const { t } = useTranslation();
   return (
-    <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
-      {players.map((p) => {
-        const isDisabled = disabledIds.includes(p.id);
-        const isSelected = selectedId === p.id || selectedIds?.includes(p.id);
+    <div className="flex gap-1.5">
+      {cards.map((c) => {
+        const meta = c.role ? ONW_ROLE_META[c.role] : null;
+        const Icon = meta?.icon;
+        const isSelected = selected.includes(c.index);
         return (
           <button
-            key={p.id}
-            disabled={!selectable || isDisabled}
-            onClick={() => onSelect?.(p.id)}
+            key={c.index}
+            type="button"
+            disabled={!selectable}
+            onClick={() => onSelect?.(c.index)}
+            title={t("onw.night.card", { n: c.index + 1 })}
             className={cn(
-              "flex flex-col items-start gap-1 rounded-lg border p-3 text-left transition-all",
-              "border-wolf-purple/20 bg-night-900/60",
-              p.dead && "opacity-40",
-              selectable && !isDisabled && "hover:border-crimson-500 hover:bg-night-700 cursor-pointer",
-              isSelected && "border-crimson-500 bg-crimson-600/20 ring-1 ring-crimson-500",
-              (!selectable || isDisabled) && "cursor-default"
+              "flex h-12 w-9 sm:h-16 sm:w-11 flex-col items-center justify-center rounded-md border-2 shadow-md shadow-black/60 transition-transform",
+              c.role ? "border-[#8a6d3b] bg-[#efe2c2]" : "border-[#c9a86a] bg-[#2a1f3d]",
+              selectable && "cursor-pointer hover:-translate-y-1 ring-2 ring-[#ffd166]/50",
+              isSelected && "-translate-y-1 ring-4 ring-crimson-500"
             )}
           >
-            <div className="flex w-full items-center justify-between">
-              <span className="truncate text-sm font-medium text-moon-200 flex items-center gap-1">
-                {p.nickname}
-                {p.isSelf && <span className="text-moon-400 text-xs">({t("common.you")})</span>}
-              </span>
-              <span className="flex items-center gap-1 shrink-0">
-                {p.isHost && <Crown className="w-3 h-3 text-yellow-400" />}
-                {p.dead && <Skull className="w-3 h-3 text-crimson-500" />}
-                {p.connected ? (
-                  <Wifi className="w-3 h-3 text-emerald-500/70" />
-                ) : (
-                  <WifiOff className="w-3 h-3 text-moon-400/70" />
-                )}
-              </span>
-            </div>
-            {p.role && (
-              <Badge variant={p.role === "WEREWOLF" ? "werewolf" : "villager"}>{t(`onw.roles.${p.role}.label`)}</Badge>
-            )}
-            {p.role && p.startingRole && p.startingRole !== p.role && (
-              <span className="text-[10px] text-moon-400/70">
-                {t("onw.gameOver.startedAs", { role: t(`onw.roles.${p.startingRole}.label`) })}
-              </span>
+            {Icon ? (
+              <>
+                <Icon className={cn("h-4 w-4 sm:h-5 sm:w-5", meta?.color)} />
+                <span className="mt-0.5 px-0.5 text-center text-[7px] sm:text-[8px] font-bold leading-tight text-[#2b1d12]">
+                  {t(`onw.roles.${c.role}.label`)}
+                </span>
+              </>
+            ) : (
+              <>
+                <Eye className="h-3.5 w-3.5 text-[#c9a86a]/70" />
+                <span className="text-[9px] font-bold text-[#c9a86a]">{c.index + 1}</span>
+              </>
             )}
           </button>
         );

@@ -6,7 +6,7 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { cn } from "@/lib/utils";
 import type { TicTacToeRoomState } from "@/types/game";
-import { Copy, Crown, X as XIcon, Circle } from "lucide-react";
+import { Copy, Crown } from "lucide-react";
 import { useState } from "react";
 import { useTranslation } from "@/lib/i18n/useTranslation";
 
@@ -138,27 +138,7 @@ function TicTacToeGame({
             </p>
           )}
 
-          <div className="grid grid-cols-3 gap-2 mx-auto" style={{ maxWidth: 280 }}>
-            {room.board.map((cell, i) => {
-              const isWinningCell = room.winningLine?.includes(i);
-              return (
-                <button
-                  key={i}
-                  onClick={() => playAt(i)}
-                  disabled={!isMyTurn || Boolean(cell)}
-                  className={cn(
-                    "aspect-square rounded-lg border flex items-center justify-center text-3xl font-display transition-all",
-                    "border-wolf-purple/30 bg-night-900/60",
-                    !cell && isMyTurn && "hover:border-crimson-500 hover:bg-night-700 cursor-pointer",
-                    isWinningCell && "border-crimson-500 bg-crimson-600/20 ring-1 ring-crimson-500"
-                  )}
-                >
-                  {cell === "X" && <XIcon className="w-8 h-8 text-wolf-purple" strokeWidth={3} />}
-                  {cell === "O" && <Circle className="w-7 h-7 text-crimson-500" strokeWidth={3} />}
-                </button>
-              );
-            })}
-          </div>
+          <WoodBoard board={room.board} winningLine={room.winningLine} canPlay={isMyTurn} onPlay={playAt} />
 
           {gameOver && you?.isHost && (
             <Button className="w-full mt-6" size="lg" onClick={() => socket.emit("ttt_rematch")}>
@@ -171,6 +151,76 @@ function TicTacToeGame({
         </CardContent>
       </Card>
     </div>
+  );
+}
+
+// A carved wooden board: dark walnut X pieces, light maple O rings. The
+// grooves between squares are the board itself showing through the gaps.
+const WOOD_FRAME = {
+  background:
+    "repeating-linear-gradient(88deg, rgba(0,0,0,0.08) 0 2px, transparent 2px 11px), linear-gradient(135deg, #7a4a24 0%, #5a3418 50%, #3e2410 100%)",
+};
+const WOOD_SQUARE = {
+  background:
+    "repeating-linear-gradient(92deg, rgba(90,52,24,0.10) 0 1px, transparent 1px 9px), radial-gradient(ellipse at 30% 25%, #e2bf86 0%, #c99a5b 70%, #b8864a 100%)",
+};
+
+function WoodBoard({
+  board,
+  winningLine,
+  canPlay,
+  onPlay,
+}: {
+  board: ("X" | "O" | null)[];
+  winningLine: number[] | null;
+  canPlay: boolean;
+  onPlay: (index: number) => void;
+}) {
+  return (
+    <div className="mx-auto rounded-2xl p-3 shadow-[0_12px_30px_rgba(0,0,0,0.6)]" style={{ ...WOOD_FRAME, maxWidth: 320 }}>
+      <div className="grid grid-cols-3 gap-2 rounded-lg bg-[#3e2410] p-2 shadow-[inset_0_2px_8px_rgba(0,0,0,0.7)]">
+        {board.map((cell, i) => {
+          const winning = winningLine?.includes(i);
+          const open = !cell && canPlay;
+          return (
+            <button
+              key={i}
+              onClick={() => onPlay(i)}
+              disabled={!open}
+              className={cn(
+                "group aspect-square rounded-md flex items-center justify-center shadow-[inset_0_-3px_6px_rgba(0,0,0,0.25),inset_0_2px_3px_rgba(255,255,255,0.25)] transition-all",
+                open && "cursor-pointer hover:brightness-110",
+                winning && "ring-4 ring-amber-300 shadow-[0_0_18px_rgba(252,211,77,0.8)]"
+              )}
+              style={WOOD_SQUARE}
+            >
+              {cell === "X" && <XPiece />}
+              {cell === "O" && <OPiece />}
+              {open && <span className="h-3 w-3 rounded-full bg-[#5a3418]/0 group-hover:bg-[#5a3418]/30 transition-colors" />}
+            </button>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+function XPiece() {
+  const bar = "absolute left-1/2 top-1/2 h-[18%] w-[78%] rounded-full bg-gradient-to-b from-[#5b3a29] to-[#2e1a10] shadow-[0_4px_6px_rgba(0,0,0,0.5)]";
+  return (
+    <span className="relative block h-[72%] w-[72%] animate-piece-drop">
+      <span className={cn(bar, "-translate-x-1/2 -translate-y-1/2 rotate-45")} />
+      <span className={cn(bar, "-translate-x-1/2 -translate-y-1/2 -rotate-45")} />
+    </span>
+  );
+}
+
+function OPiece() {
+  return (
+    <span
+      className="block h-[66%] w-[66%] rounded-full border-[9px] border-[#f2dcb0] shadow-[0_4px_6px_rgba(0,0,0,0.45),inset_0_2px_4px_rgba(0,0,0,0.35)] animate-piece-drop"
+      style={{ borderTopColor: "#fbeccc", borderBottomColor: "#d9bd86" }}
+    />
   );
 }
 

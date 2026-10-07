@@ -5,10 +5,10 @@ import type { Socket } from "socket.io-client";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Crown, Copy, Wifi, WifiOff } from "lucide-react";
-import type { KrakenRoomState } from "@/types/game";
+import type { KrakenLobbyState } from "@/types/game";
 import { useTranslation } from "@/lib/i18n/useTranslation";
 
-export function KrakenLobby({ room, socket }: { room: KrakenRoomState; socket: Socket }) {
+export function KrakenLobby({ room, socket }: { room: KrakenLobbyState; socket: Socket }) {
   const { t, tp } = useTranslation();
   const isHost = room.you?.isHost;
   const count = room.players.length;
@@ -28,8 +28,6 @@ export function KrakenLobby({ room, socket }: { room: KrakenRoomState; socket: S
       if (res?.error) setStartError(res.error);
     });
   }
-
-  const comp = room.composition;
 
   return (
     <div className="grid md:grid-cols-2 gap-4">
@@ -66,13 +64,12 @@ export function KrakenLobby({ room, socket }: { room: KrakenRoomState; socket: S
             ))}
           </div>
 
-          {comp ? (
+          {room.lobby.mapId && canStart ? (
             <p className="text-moon-300 text-xs">
-              {t("kraken.lobby.compositionLine", {
-                count,
-                sailors: comp.SAILOR,
-                pirates: comp.PIRATE,
-                cultists: comp.CULTIST,
+              {t("kraken.lobby.setupLine", {
+                map: t(`kraken.lobby.maps.${room.lobby.mapId}`),
+                threshold: room.lobby.threshold,
+                offDuty: room.lobby.offDuty,
               })}
             </p>
           ) : (
@@ -96,7 +93,7 @@ export function KrakenLobby({ room, socket }: { room: KrakenRoomState; socket: S
         </CardHeader>
         <CardContent>
           <ul className="space-y-3 text-sm text-moon-300 list-disc pl-5">
-            {["rule1", "rule2", "rule3", "rule4", "rule5"].map((k) => (
+            {["rule1", "rule2", "rule3", "rule4", "rule5", "rule6", "rule7"].map((k) => (
               <li key={k}>{t(`kraken.lobby.${k}`)}</li>
             ))}
           </ul>

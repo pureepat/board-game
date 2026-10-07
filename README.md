@@ -44,7 +44,7 @@ Werewolf is a hidden-information game: villagers must never learn who the werewo
 - Only werewolves receive `wolfChat` / `wolfVotes` in the `night` block; everyone else gets an empty array / `undefined`.
 - The Seer's `seerResult` is only ever attached to the Seer's own payload, and only reflects their own most recent check.
 - Doctor/Seer/Werewolf action confirmation (`youActed`) tells a client "your action was received" without revealing anyone else's choice.
-- **One Night Werewolf**: nobody's `role`/`startingRole` is ever sent for anyone but themselves until `GAME_OVER` — not even a "your role" field is exposed generically, only through the specific reveal that actually surfaces it (`myNightLog` entries), since e.g. a Troublemaker's swap target isn't supposed to learn their card changed. Center cards are per-slot: a slot's `role` is `null` unless *this* viewer personally peeked that exact slot (tracked by matching their own `myNightLog` entries) or the game has ended.
+- **One Night Werewolf**: nobody's `role`/`startingRole` is ever sent for anyone but themselves until `GAME_OVER` — not even a "your role" field is exposed generically, only through the specific reveal that actually surfaces it (`myNightLog` entries), since e.g. a Troublemaker's swap target isn't supposed to learn their card changed. Center cards are per-slot: a slot's `role` is `null` unless *this* viewer personally peeked that exact slot, and then it's the card **as they saw it**, read from their own `myNightLog` entry — never the slot's current card (a Drunk swapping with that slot later must not be revealed to the earlier peeker). Everyone sees the real cards once the game has ended.
 
 Because filtering happens server-side per recipient, there is no client-side flag or state a player could flip in devtools to see hidden roles — the data simply never reaches their browser.
 
@@ -58,7 +58,11 @@ Tic Tac Toe is far simpler (no hidden information, just turn order) and lives in
 
 One Night Ultimate Werewolf (`lib/onuwLogic.js`) is a single-night game: the deck has exactly `players + 3` cards, everyone gets one, 3 go face-down to the "center." Night proceeds through a **fixed wake order** (`ONW_NIGHT_ORDER` in `lib/types.js`: Werewolf → Minion → Mason → Seer → Robber → Troublemaker → Drunk → Insomniac); a role with nobody holding it as their *starting* card is skipped automatically. Eligibility for each step is based on the card a player was **originally dealt** (`startingRole`), not their current card — exactly matching the tabletop rule, since a player only knows to "wake up" from their own memory of what they were dealt, not from cards that moved around after. Robber/Troublemaker/Drunk mutate `player.role` (current card); `startingRole` never changes. After the night, one Day discussion and a single Voting round follow — ties don't cause a revote like classic Werewolf, *everyone* tied for the most votes dies (official ONUW rule), with a Hunter's death chaining to whoever they voted for. Win conditions in `checkWinner`: a dead Tanner wins alone; otherwise a dead Werewolf means the Village wins; otherwise the Werewolves win (or the Village wins by default if there were no Werewolves in play and nobody died).
 
-Feed the Kraken (`lib/krakenLogic.js`) is a 5–11 player social-deduction game with its own phases (`CREW_SELECT → CREW_VOTE → VOYAGE → VOYAGE_RESULT → … → GAME_OVER`) so it can't collide with the Werewolf phase names. Allegiances (`KRAKEN_DISTRIBUTION` in `lib/types.js`): Sailors, Pirates, and from 7 players one lone Cultist. Each voyage the rotating Captain proposes a crew, everyone votes (strict majority approves; 3 rejected crews in a row = Pirates win), crew members secretly play a card (Sailors: Calm; Pirates: Calm/Sabotage; Cultist: also Offering). Cards are shuffled before being revealed so they're never attributed. An Offering feeds the Kraken, otherwise any Sabotage scores for the Pirates, otherwise the Sailors score; first to 3 wins. `getKrakenView` only reveals an allegiance to its owner, to fellow Pirates, and to everyone at game over; crew votes are hidden until the last vote lands. This is an original streamlined adaptation of the table-top game's idea, not a rules-exact port. The host has a `kraken_force_advance` escape hatch for AFK players. Chat is `kraken_chat_message` (open to everyone, all phases).
+Feed the Kraken (`lib/krakenLogic.js` + rule tables in `lib/krakenRules.js`) follows the published box rules: 5–11 players, secret factions (Sailors, Pirates, one Cult Leader; Cultists only appear through Conversion, or one is dealt at 11 players), 3 guns each. A round is `KR_APPOINT` (Captain names Lieutenant + Navigator, skipping off-duty players) → `KR_MUTINY` (everyone but the Captain secretly commits guns; reaching the threshold — 3/4/5 by table size — makes the top gun-holder Captain and spends the revealed guns) → `KR_NAV_DISCARD` (Captain and Lieutenant each draw 2 and discard 1) → `KR_NAV_CHOOSE` (Navigator plays one of the two passed cards) → optional `KR_ACTION` (map space: Cabin Search / Flogging / Off with the Tongue / Feed the Kraken, resolved by the Captain) and `KR_RITUAL` (Cult Uprising: Gun Stash / Cult Search / Conversion, resolved by the Cult Leader) → off-duty markers (navigator, lieutenant, captain — 1/2/3 by table size) → next round. Card effects: Drunk (command passes to the next player with the fewest résumés), Mermaid, Telescope, Armed, Disarmed, Cult Uprising. Red steers west to Crimson Cove (Pirates), blue east to Bluewater Bay (Sailors), yellow north to the Kraken (Cult — who also win if the Cult Leader is fed to it).
+
+**What's our own invention**: the real hex map isn't published anywhere we could read, so `KRAKEN_MAPS` (distances to each destination, where the action spaces sit, the supply line) is our own layout, tuned by simulation. The per-color breakdown of card effects comes from a single rules summary. Both live in `lib/krakenRules.js` as plain data so they can be corrected without touching the state machine. Not implemented: character powers and Denial of Command (Navigator jumping overboard).
+
+Hidden information: `getKrakenView` reveals a role only to its owner, to fellow dealt Pirates, between a Cult Leader and their converts, and to everyone at game over. Navigation hands, the navigator's two options, cabin-search / mermaid / telescope / cult-search results and gun-stash receipts go only to the player entitled to them (`privateLog`); mutiny commits are public only once revealed. All game state sits under `room.kr`, so `rekeyPlayer` re-keys a reconnecting player by walking that one object. The host has `kraken_force_advance` for every phase.
 
 ### Reconnect handling
 
@@ -82,19 +86,21 @@ components/game/NightPhase.tsx   werewolf chat/vote, seer/doctor actions, villag
 components/game/DayPhase.tsx     announcement + timed discussion chat
 components/game/VotingPhase.tsx  lynch voting UI
 components/game/GameOver.tsx     win screen + play again
-components/game/PlayerList.tsx   shared player grid (selectable for targeting)
+components/table/CampfireCircle.tsx  the campfire scene (night/day sky, fire, seats in a ring) shared by both Werewolf variants
+components/game/PlayerList.tsx   Werewolf village around the campfire (selectable for targeting, vote tallies)
 components/game/ChatBox.tsx      shared chat widget
 components/game/PhaseTimer.tsx   server-deadline-driven countdown, reused by both Werewolf variants
-lib/krakenLogic.js               Feed the Kraken state machine: dealing, captain rotation, crew vote, card play, win checks
-components/kraken/*              Feed the Kraken UI: KrakenRoom (phase router), KrakenLobby, KrakenGame (all in-game phases), KrakenGameOver, krakenMeta
-components/tictactoe/TicTacToeRoom.tsx   Tic Tac Toe lobby, board, and rematch UI (all phases)
+lib/krakenLogic.js               Feed the Kraken state machine: appoint, mutiny, navigation, map actions, cult rituals, off-duty, win checks
+lib/krakenRules.js               Feed the Kraken rule data: faction table, deck, thresholds, off-duty counts, the two hex maps
+components/kraken/*              Feed the Kraken UI: KrakenRoom (router), KrakenLobby, KrakenGame (the table: seats, hand, logs), KrakenBoard (SVG hex map + ship), KrakenGameOver, krakenMeta
+components/tictactoe/TicTacToeRoom.tsx   Tic Tac Toe lobby, wooden board with walnut X / maple O pieces, rematch UI (all phases)
 components/onw/OnwRoom.tsx       One Night Werewolf phase router (Lobby/Night/Day/Voting/GameOver)
 components/onw/OnwLobby.tsx      role deck + per-step/day/voting timer config (host controls)
 components/onw/OnwNight.tsx      the wake-order sequence UI — per-role action forms, waiting state, step strip
 components/onw/OnwDay.tsx        discussion chat + persistent "Your Night Log" recap
 components/onw/OnwVoting.tsx     single-round vote grid (everyone votes, ties all die)
 components/onw/OnwGameOver.tsx   starting→final role reveal, winner banner, rematch
-components/onw/OnwPlayerList.tsx roster grid without the alive/role assumptions PlayerList makes
+components/onw/OnwPlayerList.tsx One Night circle around the campfire, with the 3 center cards by the fire (selectable for Seer/Drunk/lone Werewolf)
 components/onw/NightLog.tsx      renders a player's private myNightLog entries as readable sentences
 components/onw/roleInfo.ts       role labels/icons/descriptions shared across the ONW components
 components/ui/*                  button/card/badge/input primitives

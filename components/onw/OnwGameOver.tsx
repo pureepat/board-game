@@ -37,7 +37,7 @@ export function OnwGameOver({ room, socket }: { room: OnwRoomState; socket: Sock
           <CardTitle>{t("onw.gameOver.finalRoles")}</CardTitle>
         </CardHeader>
         <CardContent>
-          <OnwPlayerList players={room.players} />
+          <OnwPlayerList players={room.players} center={room.center} time="day" />
         </CardContent>
       </Card>
 

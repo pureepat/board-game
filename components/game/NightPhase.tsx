@@ -15,12 +15,13 @@ import { useTranslation } from "@/lib/i18n/useTranslation";
 export function NightPhase({ room, socket }: { room: FilteredRoomState; socket: Socket }) {
   const { t } = useTranslation();
   const role = room.you?.role;
-  const alive = room.you?.alive;
+  const alive = Boolean(room.you?.alive);
   const [selected, setSelected] = useState<string | null>(null);
   const night = room.night;
 
-  const alivePlayers = room.players.filter((p) => p.alive);
-  const selectableTargets = alivePlayers.filter((p) => !p.isSelf || role !== "WEREWOLF");
+  // Werewolves can't target themselves; the Seer and Bodyguard can pick anyone alive.
+  const acting = alive && (role === "WEREWOLF" || role === "SEER" || role === "DOCTOR") && !night?.youActed;
+  const disabledIds = role === "WEREWOLF" ? room.players.filter((p) => p.isSelf).map((p) => p.id) : [];
 
   function confirmTarget() {
     if (!selected) return;
@@ -29,72 +30,60 @@ export function NightPhase({ room, socket }: { room: FilteredRoomState; socket: 
     if (role === "DOCTOR") socket.emit("doctor_action", { targetId: selected });
   }
 
-  if (!alive) {
-    return <SpectatorNight room={room} />;
-  }
+  const prompt =
+    role === "WEREWOLF"
+      ? { icon: <Skull className="w-4 h-4 text-crimson-500" />, label: t("werewolf.night.chooseVictim"), done: t("werewolf.night.voteSubmitted") }
+      : role === "SEER"
+      ? { icon: <Eye className="w-4 h-4 text-wolf-purple" />, label: t("werewolf.night.chooseInvestigate"), done: t("werewolf.night.investigationSubmitted") }
+      : role === "DOCTOR"
+      ? { icon: <Shield className="w-4 h-4 text-emerald-400" />, label: t("werewolf.night.chooseProtect"), done: t("werewolf.night.protectionAssigned") }
+      : null;
 
   return (
-    <div className="grid md:grid-cols-2 gap-4">
-      <Card className="animate-day-sweep">
-        <CardHeader className="flex flex-row items-center justify-between">
-          <CardTitle className="flex items-center gap-2">
-            <Moon className="w-5 h-5 text-moon-300" /> {t("werewolf.night.title", { dayCount: room.dayCount })}
-          </CardTitle>
-          <PhaseTimer endsAt={room.phaseEndsAt} />
-        </CardHeader>
-        <CardContent>
-          {role === "WEREWOLF" && (
-            <RoleAction
-              icon={<Skull className="w-4 h-4 text-crimson-500" />}
-              label={t("werewolf.night.chooseVictim")}
-              players={selectableTargets}
-              selected={selected}
-              onSelect={setSelected}
-              onConfirm={confirmTarget}
-              acted={night?.youActed}
-              actedLabel={t("werewolf.night.voteSubmitted")}
-            />
-          )}
-          {role === "SEER" && (
-            <RoleAction
-              icon={<Eye className="w-4 h-4 text-wolf-purple" />}
-              label={t("werewolf.night.chooseInvestigate")}
-              players={selectableTargets}
-              selected={selected}
-              onSelect={setSelected}
-              onConfirm={confirmTarget}
-              acted={night?.youActed}
-              actedLabel={t("werewolf.night.investigationSubmitted")}
-            />
-          )}
-          {room.seerResult && (
-            <div className="mt-4">
-              <SeerNote result={room.seerResult} />
-            </div>
-          )}
-          {role === "DOCTOR" && (
-            <RoleAction
-              icon={<Shield className="w-4 h-4 text-emerald-400" />}
-              label={t("werewolf.night.chooseProtect")}
-              players={selectableTargets}
-              selected={selected}
-              onSelect={setSelected}
-              onConfirm={confirmTarget}
-              acted={night?.youActed}
-              actedLabel={t("werewolf.night.protectionAssigned")}
-            />
-          )}
-          {role === "VILLAGER" && (
-            <div className="text-center py-10 text-moon-400">
-              <Moon className="w-8 h-8 mx-auto mb-3 opacity-50" />
-              <p>{t("werewolf.night.sleepMsg")}</p>
-            </div>
-          )}
-        </CardContent>
-      </Card>
+    <div className="space-y-4">
+      <PlayerList
+        players={room.players}
+        time="night"
+        selectable={acting}
+        selectedId={selected}
+        onSelect={setSelected}
+        disabledIds={disabledIds}
+      />
 
-      <div className="space-y-4">
-        {role === "WEREWOLF" && (
+      <div className="grid md:grid-cols-2 gap-4">
+        <Card className="animate-day-sweep">
+          <CardHeader className="flex flex-row items-center justify-between">
+            <CardTitle className="flex items-center gap-2">
+              <Moon className="w-5 h-5 text-moon-300" />{" "}
+              {alive ? t("werewolf.night.title", { dayCount: room.dayCount }) : t("werewolf.night.spectatingTitle", { dayCount: room.dayCount })}
+            </CardTitle>
+            <PhaseTimer endsAt={room.phaseEndsAt} />
+          </CardHeader>
+          <CardContent className="space-y-4">
+            {!alive && <p className="text-moon-400 text-sm">{t("werewolf.night.spectatingDesc")}</p>}
+            {alive && prompt && night?.youActed && <p className="text-emerald-400 text-sm text-center py-4">{prompt.done}</p>}
+            {acting && prompt && (
+              <>
+                <p className="flex items-center gap-2 text-sm text-moon-300">
+                  {prompt.icon} {prompt.label}
+                </p>
+                <Button className="w-full" disabled={!selected} onClick={confirmTarget}>
+                  {t("common.confirm")}
+                  {selected && ` — ${room.players.find((p) => p.id === selected)?.nickname}`}
+                </Button>
+              </>
+            )}
+            {alive && role === "VILLAGER" && (
+              <div className="text-center py-6 text-moon-400">
+                <Moon className="w-8 h-8 mx-auto mb-3 opacity-50" />
+                <p>{t("werewolf.night.sleepMsg")}</p>
+              </div>
+            )}
+            {room.seerResult && <SeerNote result={room.seerResult} />}
+          </CardContent>
+        </Card>
+
+        {role === "WEREWOLF" && alive && (
           <Card>
             <CardHeader>
               <CardTitle className="flex items-center gap-2">
@@ -111,70 +100,7 @@ export function NightPhase({ room, socket }: { room: FilteredRoomState; socket: 
             </CardContent>
           </Card>
         )}
-
-        <Card>
-          <CardHeader>
-            <CardTitle>{t("werewolf.night.theVillage")}</CardTitle>
-          </CardHeader>
-          <CardContent>
-            <PlayerList players={room.players} />
-          </CardContent>
-        </Card>
       </div>
     </div>
-  );
-}
-
-function RoleAction({
-  icon,
-  label,
-  players,
-  selected,
-  onSelect,
-  onConfirm,
-  acted,
-  actedLabel,
-}: {
-  icon: React.ReactNode;
-  label: string;
-  players: FilteredRoomState["players"];
-  selected: string | null;
-  onSelect: (id: string) => void;
-  onConfirm: () => void;
-  acted?: boolean;
-  actedLabel: string;
-}) {
-  const { t } = useTranslation();
-  if (acted) {
-    return <p className="text-emerald-400 text-sm text-center py-6">{actedLabel}</p>;
-  }
-  return (
-    <div>
-      <p className="flex items-center gap-2 text-sm text-moon-300 mb-3">
-        {icon} {label}
-      </p>
-      <PlayerList players={players} selectable selectedId={selected} onSelect={onSelect} />
-      <Button className="w-full mt-4" disabled={!selected} onClick={onConfirm}>
-        {t("common.confirm")}
-      </Button>
-    </div>
-  );
-}
-
-function SpectatorNight({ room }: { room: FilteredRoomState }) {
-  const { t } = useTranslation();
-  return (
-    <Card>
-      <CardHeader className="flex flex-row items-center justify-between">
-        <CardTitle className="flex items-center gap-2">
-          <Moon className="w-5 h-5 text-moon-300" /> {t("werewolf.night.spectatingTitle", { dayCount: room.dayCount })}
-        </CardTitle>
-        <PhaseTimer endsAt={room.phaseEndsAt} />
-      </CardHeader>
-      <CardContent>
-        <p className="text-moon-400 text-sm mb-3">{t("werewolf.night.spectatingDesc")}</p>
-        <PlayerList players={room.players} />
-      </CardContent>
-    </Card>
   );
 }
