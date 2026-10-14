@@ -3,7 +3,7 @@
 import { Suspense, useEffect, useState } from "react";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
-import { Moon, Grid3x3, ArrowLeft, DoorOpen, KeyRound, Zap, Anchor, BookOpen } from "lucide-react";
+import { Moon, Grid3x3, ArrowLeft, DoorOpen, KeyRound, Zap, Anchor, BookOpen, MessageCircleQuestion } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -11,7 +11,8 @@ import { LanguageSwitcher } from "@/components/LanguageSwitcher";
 import { getSocket } from "@/lib/socketClient";
 import { cn } from "@/lib/utils";
 import { useTranslation } from "@/lib/i18n/useTranslation";
-import type { GameType } from "@/types/game";
+import type { GameType, PlayMode } from "@/types/game";
+import { PlayModePicker } from "@/components/table/PlayMode";
 
 type Step = "choose" | "create" | "join";
 
@@ -20,9 +21,10 @@ const GAME_ICONS: Record<GameType, React.ElementType> = {
   TICTACTOE: Grid3x3,
   ONE_NIGHT_WEREWOLF: Zap,
   FEED_THE_KRAKEN: Anchor,
+  INSIDER: MessageCircleQuestion,
 };
 
-const GAME_IDS: GameType[] = ["WEREWOLF", "TICTACTOE", "ONE_NIGHT_WEREWOLF", "FEED_THE_KRAKEN"];
+const GAME_IDS: GameType[] = ["WEREWOLF", "TICTACTOE", "ONE_NIGHT_WEREWOLF", "FEED_THE_KRAKEN", "INSIDER"];
 
 export default function HomePage() {
   return (
@@ -40,6 +42,7 @@ function HomePageInner() {
   const [nickname, setNickname] = useState("");
   const [joinCode, setJoinCode] = useState("");
   const [gameType, setGameType] = useState<GameType | null>(null);
+  const [playMode, setPlayMode] = useState<PlayMode>("local");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -75,7 +78,7 @@ function HomePageInner() {
     const socket = getSocket();
     socket.emit(
       "create_room",
-      { nickname, gameType },
+      { nickname, gameType, playMode },
       (res: { code?: string; playerId?: string; error?: string }) => {
         setLoading(false);
         if (res.error) return setError(res.error);
@@ -206,6 +209,14 @@ function HomePageInner() {
                   })}
                 </div>
               </div>
+
+              {/* Tic Tac Toe plays the same either way, so it skips the question. */}
+              {gameType && gameType !== "TICTACTOE" && (
+                <div>
+                  <label className="text-xs text-moon-400 mb-1 block">{t("playMode.title")}</label>
+                  <PlayModePicker value={playMode} onChange={setPlayMode} />
+                </div>
+              )}
 
               <div>
                 <label className="text-xs text-moon-400 mb-1 block">{t("common.nickname")}</label>

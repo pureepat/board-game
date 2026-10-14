@@ -7,6 +7,7 @@ import { WEREWOLF_ROLE_META } from "@/components/game/roleMeta";
 import type { FilteredRoomState } from "@/types/game";
 import { User } from "lucide-react";
 import { useTranslation } from "@/lib/i18n/useTranslation";
+import { SecretPeek } from "@/components/table/PlayMode";
 
 export function RoleReveal({ room }: { room: FilteredRoomState }) {
   const { t } = useTranslation();
@@ -19,6 +20,8 @@ export function RoleReveal({ room }: { room: FilteredRoomState }) {
       <Card className="max-w-md w-full animate-fade-in border-2 border-wolf-purple/50 shadow-[0_0_40px_-10px_rgba(109,40,217,0.6)]">
         <CardContent className="flex flex-col items-center text-center py-10">
           <p className="text-moon-400 text-sm tracking-widest mb-4">{t("werewolf.roleReveal.yourRoleIs")}</p>
+          <SecretPeek>
+          <div className="flex flex-col items-center">
           <div className={`rounded-full border-2 border-current p-6 mb-4 ${meta?.color}`}>
             <Icon className="w-12 h-12" />
           </div>
@@ -28,6 +31,8 @@ export function RoleReveal({ room }: { room: FilteredRoomState }) {
           <p className="text-moon-300 text-sm leading-relaxed">
             {role ? t(`werewolf.roleReveal.roles.${role}.desc`) : ""}
           </p>
+          </div>
+          </SecretPeek>
           <p className="text-moon-400/60 text-xs mt-6">{t("werewolf.roleReveal.villageStirs")}</p>
           <PhaseTimer endsAt={room.phaseEndsAt} className="mt-4" />
         </CardContent>

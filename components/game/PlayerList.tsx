@@ -30,6 +30,7 @@ export function PlayerList({
   tally?: Record<string, number>;
 }) {
   const { t, tp } = useTranslation();
+  const allKnown = players.every((p) => p.role);
   return (
     <CampfireCircle
       time={time}
@@ -43,7 +44,9 @@ export function PlayerList({
         dead: !p.alive,
         selectable: selectable && p.alive && !disabledIds.includes(p.id),
         selected: selectedId === p.id,
-        badge: p.role ? { label: t(`werewolf.roleReveal.roles.${p.role}.title`), hex: ROLE_HEX[p.role] } : null,
+        badge: p.role
+          ? { label: t(`werewolf.roleReveal.roles.${p.role}.title`), hex: ROLE_HEX[p.role], secret: p.alive && !allKnown }
+          : null,
         note: tally?.[p.id] ? tp("werewolf.voting.vote", tally[p.id]) : null,
       }))}
     />

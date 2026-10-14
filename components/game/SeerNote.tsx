@@ -3,12 +3,14 @@
 import { Eye } from "lucide-react";
 import type { SeerResult } from "@/types/game";
 import { useTranslation } from "@/lib/i18n/useTranslation";
+import { SecretPeek } from "@/components/table/PlayMode";
 
 /** The Seer's private knowledge from their latest check — persists across phases until their next check. */
 export function SeerNote({ result }: { result: SeerResult | null | undefined }) {
   const { t } = useTranslation();
   if (!result) return null;
   return (
+    <SecretPeek>
     <div className="flex items-start gap-2 p-3 rounded-lg bg-wolf-purple/10 border border-wolf-purple/40 text-sm">
       <Eye className="w-4 h-4 text-wolf-purple shrink-0 mt-0.5" />
       <p>
@@ -19,5 +21,6 @@ export function SeerNote({ result }: { result: SeerResult | null | undefined }) 
         .
       </p>
     </div>
+    </SecretPeek>
   );
 }

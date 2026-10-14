@@ -6,6 +6,7 @@ import { CampfireCircle } from "@/components/table/CampfireCircle";
 import { ONW_ROLE_META } from "@/components/onw/roleInfo";
 import { cn } from "@/lib/utils";
 import { useTranslation } from "@/lib/i18n/useTranslation";
+import { usePlayMode } from "@/components/table/PlayMode";
 
 const TEAM_HEX = { WEREWOLF: "#dc2645", MINION: "#b91c4b", TANNER: "#b45309" } as Record<string, string>;
 
@@ -44,7 +45,7 @@ export function OnwPlayerList({
       onSeatClick={onSelect}
       center={
         center?.length ? (
-          <CenterCards cards={center} selectable={centerSelectable} selected={selectedCenter} onSelect={onSelectCenter} />
+          <CenterCards cards={center} secret={!players.every((p) => p.role)} selectable={centerSelectable} selected={selectedCenter} onSelect={onSelectCenter} />
         ) : undefined
       }
       seats={players.map((p) => ({
@@ -69,19 +70,24 @@ export function OnwPlayerList({
 
 function CenterCards({
   cards,
+  secret,
   selectable,
   selected,
   onSelect,
 }: {
   cards: OnwCenterCard[];
+  /** Mid-game, a face-up center card is something only this viewer peeked at. */
+  secret: boolean;
   selectable: boolean;
   selected: number[];
   onSelect?: (index: number) => void;
 }) {
   const { t } = useTranslation();
+  const { showSecrets } = usePlayMode();
   return (
     <div className="flex gap-1.5">
-      {cards.map((c) => {
+      {cards.map((card) => {
+        const c = secret && !showSecrets ? { ...card, role: null } : card;
         const meta = c.role ? ONW_ROLE_META[c.role] : null;
         const Icon = meta?.icon;
         const isSelected = selected.includes(c.index);

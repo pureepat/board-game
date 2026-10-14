@@ -1,6 +1,7 @@
-import { Anchor, Grid3x3, Moon, Zap } from "lucide-react";
+import { Anchor, Grid3x3, MessageCircleQuestion, Moon, Zap } from "lucide-react";
 import { WEREWOLF_ROLE_META } from "@/components/game/roleMeta";
 import { ONW_ROLE_META, ONW_ROLE_ORDER } from "@/components/onw/roleInfo";
+import { INS_ROLE_META } from "@/components/insider/insiderMeta";
 import { KR_ACTION_ICON, KR_EFFECT_ICON, KRAKEN_ROLE_META } from "@/components/kraken/krakenMeta";
 import type { GameType } from "@/types/game";
 
@@ -27,6 +28,7 @@ export interface GameGuide {
 }
 
 const WEREWOLF_ROLES = ["WEREWOLF", "SEER", "DOCTOR", "VILLAGER"];
+const INSIDER_ROLES = ["MASTER", "INSIDER", "COMMON"] as const;
 const KRAKEN_ROLES = ["SAILOR", "PIRATE", "CULT_LEADER", "CULTIST"] as const;
 const KRAKEN_EFFECTS = ["DRUNK", "MERMAID", "TELESCOPE", "ARMED", "DISARMED", "CULT_UPRISING"] as const;
 const KRAKEN_ACTIONS = ["CABIN_SEARCH", "FLOGGING", "OFF_WITH_TONGUE", "FEED_THE_KRAKEN"] as const;
@@ -112,6 +114,23 @@ export const GAME_GUIDES: GameGuide[] = [
           color: "text-amber-300",
           labelKey: `kraken.actions.${a}.label`,
           descKey: `kraken.actions.${a}.desc`,
+        })),
+      },
+    ],
+  },
+  {
+    id: "INSIDER",
+    icon: MessageCircleQuestion,
+    ruleKeys: [1, 2, 3, 4, 5, 6].map((n) => `insider.lobby.rule${n}`),
+    sections: [
+      {
+        titleKey: "guide.roles",
+        items: INSIDER_ROLES.map((r) => ({
+          id: r,
+          icon: INS_ROLE_META[r].icon,
+          color: r === "MASTER" ? "text-amber-400" : r === "INSIDER" ? "text-violet-400" : "text-moon-300",
+          labelKey: `insider.roles.${r}.label`,
+          descKey: `insider.roles.${r}.desc`,
         })),
       },
     ],

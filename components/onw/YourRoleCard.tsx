@@ -5,6 +5,7 @@ import { cn } from "@/lib/utils";
 import { useTranslation } from "@/lib/i18n/useTranslation";
 import { ONW_ROLE_META } from "@/components/onw/roleInfo";
 import type { OnwRole } from "@/types/game";
+import { SecretPeek } from "@/components/table/PlayMode";
 
 /** Persistent reminder of the player's starting card — the only role info a player reliably "has" without a specific reveal, so it stays visible through Night, Day, and Voting. */
 export function YourRoleCard({ role }: { role: OnwRole | null | undefined }) {
@@ -13,6 +14,7 @@ export function YourRoleCard({ role }: { role: OnwRole | null | undefined }) {
   const Icon = meta?.icon ?? HelpCircle;
 
   return (
+    <SecretPeek className="mb-4">
     <div className="flex items-center gap-3 mb-4 p-3 rounded-lg bg-night-900/60 border border-wolf-purple/20">
       <div className={cn("rounded-full border-2 border-current p-2", meta?.color)}>
         <Icon className="w-5 h-5" />
@@ -22,5 +24,6 @@ export function YourRoleCard({ role }: { role: OnwRole | null | undefined }) {
         <p className={cn("font-display text-lg", meta?.color)}>{role ? t(`onw.roles.${role}.label`) : "..."}</p>
       </div>
     </div>
+    </SecretPeek>
   );
 }

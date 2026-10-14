@@ -11,6 +11,7 @@ import type { KrakenEvent, KrakenGameState, KrakenNavCard, KrakenPlayer, KrakenP
 import { KrakenBoard } from "@/components/kraken/KrakenBoard";
 import { KR_EFFECT_ICON, KR_GUN_ICON, KR_HEX, KR_TEAM_HEX, KRAKEN_ROLE_META } from "@/components/kraken/krakenMeta";
 import { useTranslation } from "@/lib/i18n/useTranslation";
+import { SecretPeek, usePlayMode } from "@/components/table/PlayMode";
 
 type T = ReturnType<typeof useTranslation>["t"];
 
@@ -99,11 +100,17 @@ export function KrakenGame({ room, socket }: { room: KrakenGameState; socket: So
         <div className="mt-4 flex flex-col md:flex-row items-center md:items-end justify-center gap-4 rounded-xl bg-black/25 p-3 md:p-4">
           <div className="flex items-end gap-3">
             {self && <Seat room={room} player={self} mode={mode} sel={sel} onTap={() => tap(self.id)} />}
-            {room.you?.role && <RoleCard room={room} />}
+            {room.you?.role && (
+              <SecretPeek className="w-36 self-stretch">
+                <RoleCard room={room} />
+              </SecretPeek>
+            )}
           </div>
           <div className="flex flex-col items-center gap-2 md:min-w-[300px]">
             <p className="text-[11px] uppercase tracking-widest text-[#c9a86a]">{t("kraken.board.yourHand")}</p>
-            <HandActions room={room} socket={socket} mode={mode} sel={sel} onReset={() => setSel([])} />
+            <SecretPeek>
+              <HandActions room={room} socket={socket} mode={mode} sel={sel} onReset={() => setSel([])} />
+            </SecretPeek>
             {room.you?.isHost && (
               <button
                 type="button"
@@ -129,6 +136,7 @@ export function KrakenGame({ room, socket }: { room: KrakenGameState; socket: So
               onSend={(text) => socket.emit("kraken_chat_message", { text })}
               placeholder={silenced ? t("kraken.chat.silenced") : t("kraken.chat.placeholder")}
               disabled={silenced}
+              inPersonHint={silenced ? t("kraken.chat.silenced") : undefined}
             />
           </CardContent>
         </Card>
@@ -162,7 +170,9 @@ function Seat({
   const waiting =
     (room.phase === "KR_MUTINY" && room.mutiny && !player.isCaptain && !player.eliminated && !room.mutiny.committedIds.includes(player.id)) ||
     ((room.phase === "KR_NAV_DISCARD" || room.phase === "KR_NAV_CHOOSE") && room.nav?.waitingIds.includes(player.id));
-  const showRole = player.role && (!player.isSelf || room.phase === "GAME_OVER");
+  const { showSecrets } = usePlayMode();
+  // Someone else's role on your screen is something you secretly know (fellow Pirate, convert).
+  const showRole = player.role && (!player.isSelf || room.phase === "GAME_OVER") && (showSecrets || room.phase === "GAME_OVER");
 
   // Preview of the officer you're about to appoint / guns you're about to hand out.
   let preview: string | null = null;
@@ -626,13 +636,17 @@ function SecretsCard({ notes }: { notes: KrakenPrivateNote[] }) {
       <CardHeader>
         <CardTitle>{t("kraken.log.secrets")}</CardTitle>
       </CardHeader>
-      <CardContent className="space-y-1.5">
+      <CardContent>
+        <SecretPeek>
+        <div className="space-y-1.5">
         {[...notes].reverse().map((n, i) => (
           <p key={notes.length - i} className="text-xs text-moon-200">
             <span className="text-moon-400 mr-1">#{n.round}</span>
             {noteText(t, n)}
           </p>
         ))}
+        </div>
+        </SecretPeek>
       </CardContent>
     </Card>
   );

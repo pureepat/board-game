@@ -13,6 +13,8 @@ import { GameOver } from "@/components/game/GameOver";
 import { TicTacToeRoom } from "@/components/tictactoe/TicTacToeRoom";
 import { OnwRoom } from "@/components/onw/OnwRoom";
 import { KrakenRoom } from "@/components/kraken/KrakenRoom";
+import { InsiderRoom } from "@/components/insider/InsiderRoom";
+import { PlayModeChip, PlayModeLobbyBar, PlayModeProvider } from "@/components/table/PlayMode";
 import { Button } from "@/components/ui/button";
 import { LanguageSwitcher } from "@/components/LanguageSwitcher";
 import { useTranslation } from "@/lib/i18n/useTranslation";
@@ -108,12 +110,17 @@ export default function RoomPage() {
     );
   }
 
+  const playMode = room.playMode ?? "online";
+  const usesPlayMode = room.gameType !== "TICTACTOE";
+
   return (
+    <PlayModeProvider mode={usesPlayMode ? playMode : "online"}>
     <main className="min-h-screen px-4 py-8">
       <div className="max-w-4xl mx-auto">
         <header className="flex flex-wrap items-center justify-between gap-3 mb-6">
           <h1 className="font-display text-2xl text-moon-200 tracking-widest">{t(`room.titles.${room.gameType}`)}</h1>
           <div className="flex flex-wrap items-center gap-3">
+            {usesPlayMode && room.phase !== "LOBBY" && <PlayModeChip value={playMode} />}
             <LanguageSwitcher />
             <span className="text-moon-400 text-sm">
               {t("common.room")} <span className="font-display text-moon-200">{room.code}</span>
@@ -130,11 +137,17 @@ export default function RoomPage() {
           </div>
         )}
 
+        {usesPlayMode && room.phase === "LOBBY" && (
+          <PlayModeLobbyBar value={playMode} isHost={room.hostId === socket.id} socket={socket} />
+        )}
+
         {room.gameType === "TICTACTOE" && <TicTacToeRoom room={room} socket={socket} />}
 
         {room.gameType === "ONE_NIGHT_WEREWOLF" && <OnwRoom room={room} socket={socket} />}
 
         {room.gameType === "FEED_THE_KRAKEN" && <KrakenRoom room={room} socket={socket} />}
+
+        {room.gameType === "INSIDER" && <InsiderRoom room={room} socket={socket} />}
 
         {room.gameType === "WEREWOLF" && (
           <>
@@ -148,5 +161,6 @@ export default function RoomPage() {
         )}
       </div>
     </main>
+    </PlayModeProvider>
   );
 }

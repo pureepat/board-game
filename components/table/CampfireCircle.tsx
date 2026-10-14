@@ -3,6 +3,7 @@
 import type { ReactNode } from "react";
 import { Crown, Skull, WifiOff } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { usePlayMode } from "@/components/table/PlayMode";
 
 // A clearing at night (or late afternoon) with everyone seated on log stumps
 // around a campfire. Purely presentational: callers map their own player
@@ -16,7 +17,8 @@ export interface CampSeat {
   isHost?: boolean;
   connected?: boolean;
   dead?: boolean;
-  badge?: { label: string; hex: string } | null;
+  /** `secret`: only this viewer may know it; covered at a shared table unless peeking. */
+  badge?: { label: string; hex: string; secret?: boolean } | null;
   note?: string | null;
   selectable?: boolean;
   selected?: boolean;
@@ -115,8 +117,10 @@ export function CampfireCircle({
   );
 }
 
-function SeatToken({ seat, small, onClick }: { seat: CampSeat; small: boolean; onClick?: () => void }) {
+export function SeatToken({ seat, small, onClick }: { seat: CampSeat; small: boolean; onClick?: () => void }) {
   const clickable = Boolean(seat.selectable && onClick);
+  const { showSecrets } = usePlayMode();
+  const badge = seat.badge && (!seat.badge.secret || showSecrets) ? seat.badge : seat.badge ? { label: "•••", hex: "#4b4560" } : null;
   const size = small ? "h-10 w-10 sm:h-12 sm:w-12 text-base" : "h-12 w-12 sm:h-14 sm:w-14 text-lg";
 
   return (
@@ -155,9 +159,9 @@ function SeatToken({ seat, small, onClick }: { seat: CampSeat; small: boolean; o
       >
         {seat.nickname}
       </span>
-      {seat.badge && (
-        <span className="rounded px-1.5 py-px text-[9px] sm:text-[10px] font-bold text-white" style={{ background: seat.badge.hex }}>
-          {seat.badge.label}
+      {badge && (
+        <span className="rounded px-1.5 py-px text-[9px] sm:text-[10px] font-bold text-white" style={{ background: badge.hex }}>
+          {badge.label}
         </span>
       )}
       {seat.note && <span className="rounded bg-crimson-600 px-1.5 py-px text-[9px] sm:text-[10px] font-bold text-white">{seat.note}</span>}

@@ -1,6 +1,7 @@
 "use client";
 
 import type { OnwNightLogEntry } from "@/types/game";
+import { SecretPeek } from "@/components/table/PlayMode";
 import { useTranslation } from "@/lib/i18n/useTranslation";
 
 function useDescribe() {
@@ -51,6 +52,7 @@ export function NightLog({ entries }: { entries: OnwNightLogEntry[] }) {
     return <p className="text-moon-400/60 text-xs italic">{t("onw.nightLog.empty")}</p>;
   }
   return (
+    <SecretPeek>
     <ul className="space-y-2">
       {entries.map((entry, i) => (
         <li key={i} className="text-sm text-moon-200 bg-wolf-purple/10 border border-wolf-purple/30 rounded-lg px-3 py-2">
@@ -58,5 +60,6 @@ export function NightLog({ entries }: { entries: OnwNightLogEntry[] }) {
         </li>
       ))}
     </ul>
+    </SecretPeek>
   );
 }

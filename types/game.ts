@@ -1,4 +1,4 @@
-export type GameType = "WEREWOLF" | "TICTACTOE" | "ONE_NIGHT_WEREWOLF" | "FEED_THE_KRAKEN";
+export type GameType = "WEREWOLF" | "TICTACTOE" | "ONE_NIGHT_WEREWOLF" | "FEED_THE_KRAKEN" | "INSIDER";
 
 export type Role = "VILLAGER" | "WEREWOLF" | "SEER" | "DOCTOR";
 
@@ -15,6 +15,11 @@ export type Phase =
   | "KR_NAV_CHOOSE"
   | "KR_ACTION"
   | "KR_RITUAL"
+  | "INS_WORD"
+  | "INS_QUESTIONS"
+  | "INS_DISCUSS"
+  | "INS_VOTE1"
+  | "INS_VOTE2"
   | "GAME_OVER";
 
 export interface RoleConfig {
@@ -311,4 +316,98 @@ export interface KrakenGameState extends KrakenBase {
 
 export type KrakenRoomState = KrakenLobbyState | KrakenGameState;
 
-export type RoomState = WerewolfRoomState | TicTacToeRoomState | OnwRoomState | KrakenRoomState;
+// --- Insider ----------------------------------------------------------------
+
+export type InsiderRole = "MASTER" | "INSIDER" | "COMMON";
+export type InsiderAnswer = "YES" | "NO" | "UNKNOWN" | "CORRECT";
+export type InsiderWinner = "COMMONS" | "INSIDER" | "NONE";
+export interface InsiderWord {
+  en: string;
+  th: string;
+}
+
+export interface InsiderQuestion {
+  id: number;
+  from: string;
+  nickname: string;
+  text: string;
+  answer: InsiderAnswer | null;
+}
+
+export interface InsiderMatch {
+  totalRounds: number;
+  round: number;
+  scores: { id: string; nickname: string; points: number }[];
+  history: {
+    round: number;
+    word: InsiderWord | null;
+    masterId: string;
+    insiderId: string;
+    guesserId: string | null;
+    winner: InsiderWinner;
+    gains: Record<string, number>;
+  }[];
+}
+
+interface InsiderBase {
+  gameType: "INSIDER";
+  code: string;
+  phase: Phase;
+  hostId: string;
+  winner: InsiderWinner | null;
+  chat: ChatMessage[];
+  questionSeconds: number;
+  masterMode: "rotate" | "random" | "choose";
+  masterChoice: string | null;
+  nextRotateMaster: string | null;
+  /** Match length picked in the lobby; 0 = casual. */
+  rounds: number;
+  match: InsiderMatch | null;
+}
+
+export interface InsiderLobbyState extends InsiderBase {
+  players: { id: string; nickname: string; connected: boolean; isHost: boolean; isSelf: boolean }[];
+  lobby: { min: number; max: number };
+  you: { id: string; isHost: boolean } | null;
+}
+
+export interface InsiderPlayer {
+  id: string;
+  nickname: string;
+  connected: boolean;
+  isHost: boolean;
+  isSelf: boolean;
+  isMaster: boolean;
+  isGuesser: boolean;
+  role: InsiderRole | null;
+  voted: boolean;
+}
+
+export interface InsiderGameState extends InsiderBase {
+  players: InsiderPlayer[];
+  phaseEndsAt: number | null;
+  phaseSeconds: number;
+  word: InsiderWord | null;
+  wordOptions: InsiderWord[] | null;
+  questions: InsiderQuestion[];
+  guesserId: string | null;
+  elapsedMs: number | null;
+  vote1Result: { yes: number; no: number } | null;
+  vote2Tally: Record<string, number> | null;
+  yourVote1: boolean | null;
+  yourVote2: string | null;
+  accusedId: string | null;
+  insiderId: string | null;
+  reason: "vote1" | "vote2" | "timeout" | null;
+  gains: Record<string, number> | null;
+  you: { id: string; isHost: boolean; role: InsiderRole | null; isMaster: boolean; isInsider: boolean } | null;
+}
+
+export type InsiderRoomState = InsiderLobbyState | InsiderGameState;
+
+export type PlayMode = "local" | "online";
+
+// Every view carries the room's play mode (added in lib/stateFilter.js getFilteredState).
+export type RoomState = (WerewolfRoomState | TicTacToeRoomState | OnwRoomState | KrakenRoomState | InsiderRoomState) & {
+  playMode: PlayMode;
+};

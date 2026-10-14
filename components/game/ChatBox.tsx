@@ -6,6 +6,7 @@ import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import type { ChatMessage } from "@/types/game";
 import { useTranslation } from "@/lib/i18n/useTranslation";
+import { TalkOutLoud, usePlayMode } from "@/components/table/PlayMode";
 
 export function ChatBox({
   messages,
@@ -13,20 +14,28 @@ export function ChatBox({
   disabled,
   placeholder,
   tint = "default",
+  inPerson = "hide",
+  inPersonHint,
 }: {
   messages: ChatMessage[];
   onSend: (text: string) => void;
   disabled?: boolean;
   placeholder?: string;
   tint?: "default" | "wolf";
+  /** At the same table people just talk; "keep" is for channels that must stay silent (the wolves' night chat). */
+  inPerson?: "hide" | "keep";
+  inPersonHint?: string;
 }) {
   const { t } = useTranslation();
+  const { local } = usePlayMode();
   const [text, setText] = useState("");
   const bottomRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages.length]);
+
+  if (local && inPerson === "hide") return <TalkOutLoud hint={inPersonHint} />;
 
   function submit() {
     if (!text.trim() || disabled) return;

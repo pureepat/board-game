@@ -93,6 +93,7 @@ export function NightPhase({ room, socket }: { room: FilteredRoomState; socket: 
             <CardContent>
               <ChatBox
                 tint="wolf"
+                inPerson="keep"
                 messages={night?.wolfChat ?? []}
                 onSend={(text) => socket.emit("wolf_chat_message", { text })}
                 placeholder={t("werewolf.night.coordinatePlaceholder")}

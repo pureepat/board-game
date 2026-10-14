@@ -1,6 +1,6 @@
-# Game Night
+# PartyBros
 
-Real-time multiplayer game room. Pick a game on the home page — classic Werewolf (Mafia) with an automated server-side moderator, One Night Ultimate Werewolf for a single fast round, Feed the Kraken for a ship full of suspects, or Tic Tac Toe for a quick 1v1 — then create or join a room by code.
+Real-time multiplayer game room. Pick a game on the home page — classic Werewolf (Mafia) with an automated server-side moderator, One Night Ultimate Werewolf for a single fast round, Feed the Kraken for a ship full of suspects, Insider for a word hunt with a mole, or Tic Tac Toe for a quick 1v1 — then create or join a room by code.
 
 ## Stack
 
@@ -64,6 +64,12 @@ Feed the Kraken (`lib/krakenLogic.js` + rule tables in `lib/krakenRules.js`) fol
 
 Hidden information: `getKrakenView` reveals a role only to its owner, to fellow dealt Pirates, between a Cult Leader and their converts, and to everyone at game over. Navigation hands, the navigator's two options, cabin-search / mermaid / telescope / cult-search results and gun-stash receipts go only to the player entitled to them (`privateLog`); mutiny commits are public only once revealed. All game state sits under `room.kr`, so `rekeyPlayer` re-keys a reconnecting player by walking that one object. The host has `kraken_force_advance` for every phase.
 
+Insider (`lib/insiderLogic.js`, word pool of ~350 Thai/English words in `lib/insiderWords.js`): 4–12 players (the box says 4–8; we allow up to 12). One public Master, one hidden Insider, the rest Commons. The host decides each round's Master in the lobby or on the results screen (`insider_set_master`): next in line (default), random, or a player they pick; a picked player who has left falls back to next in line. `INS_WORD` (the Master picks one of 3 words, or rerolls) → `INS_QUESTIONS` (host-set 3/5/7 min; askers type yes/no questions, the Master answers Yes / No / Don't know / Correct; typing the exact word in either language counts as a correct guess) → `INS_DISCUSS` (lasts as long as the search took, minimum 20 s, like flipping the sand timer) → `INS_VOTE1` (is the guesser the Insider? a strict majority of all players accuses them) → `INS_VOTE2` if not (everyone names a non-Master player; most votes is accused, ties broken by the guesser's vote, otherwise nobody) → `GAME_OVER`. Commons + Master win if the accused is the Insider, the Insider wins otherwise, and everyone loses if time runs out. Published sources disagree on vote details; the two-vote structure and guesser tie-break above are the version we picked. Every phase change bumps `ins.phaseSeq`; `server.js` schedules one countdown per sequence number and calls `onTimeout`. Scored matches (host picks 3/5/7/10 rounds in the lobby, `room.insMatch`): saying the word is +2, catching the Insider is +1 for everyone except the Insider (the Master included), an Insider who gets away scores +1, and a timeout scores nothing; the host moves straight to the next round from the results screen (`insider_next_round`) and the highest total after the last round wins (ties share the win). Standings and per-round gains are public. `getInsiderView` sends the word only to the Master and the Insider until it's guessed, the Insider's identity only to the Insider, and the second-vote ballots only at game over.
+
+### Play mode: together or online
+
+Every room (except Tic Tac Toe) has `room.playMode`: `"local"` (everyone at the same table, the default) or `"online"`. It's picked on the create screen and the host can switch it in the lobby (`set_play_mode`); every view carries it. `components/table/PlayMode.tsx` provides it to the UI. In `local` mode chat boxes become a "just talk" panel (the wolves' night chat stays, since they can't whisper at the table), private info (role cards, Seer notes, the ONW night log, Kraken hand and secrets, the Insider word and the Master's word choices) sits behind a tap-to-peek cover that closes itself after a few seconds, and seat badges marked `secret` show as `•••` unless you're peeking. Insider changes its rules slightly: questions are asked out loud, and the Master taps whoever said the word (`ins_mark_correct`) instead of players typing.
+
 ### Reconnect handling
 
 On create/join, the server returns `{ code, playerId }` (playerId = that socket's id). The client stores both in `sessionStorage`. On page load/refresh it calls `rejoin_room` with the stored `playerId`, and the server re-keys the existing player record onto the new socket id — preserving role/alive state through a refresh or dropped connection (2-minute grace window before the seat is freed).
@@ -86,11 +92,15 @@ components/game/NightPhase.tsx   werewolf chat/vote, seer/doctor actions, villag
 components/game/DayPhase.tsx     announcement + timed discussion chat
 components/game/VotingPhase.tsx  lynch voting UI
 components/game/GameOver.tsx     win screen + play again
+components/table/PlayMode.tsx      play-mode context, tap-to-peek SecretPeek, "just talk" panel, the together/online picker
 components/table/CampfireCircle.tsx  the campfire scene (night/day sky, fire, seats in a ring) shared by both Werewolf variants
 components/game/PlayerList.tsx   Werewolf village around the campfire (selectable for targeting, vote tallies)
 components/game/ChatBox.tsx      shared chat widget
 components/game/PhaseTimer.tsx   server-deadline-driven countdown, reused by both Werewolf variants
 lib/krakenLogic.js               Feed the Kraken state machine: appoint, mutiny, navigation, map actions, cult rituals, off-duty, win checks
+lib/insiderLogic.js              Insider state machine: word pick, questions, discussion, two votes, timeouts
+lib/insiderWords.js              Insider word pool (each word in English + Thai) and guess normalization
+components/insider/*             Insider UI: InsiderRoom (router), InsiderLobby, InsiderGame (felt table + hourglass, question feed, votes), InsiderTable, InsiderGameOver, insiderMeta
 lib/krakenRules.js               Feed the Kraken rule data: faction table, deck, thresholds, off-duty counts, the two hex maps
 components/kraken/*              Feed the Kraken UI: KrakenRoom (router), KrakenLobby, KrakenGame (the table: seats, hand, logs), KrakenBoard (SVG hex map + ship), KrakenGameOver, krakenMeta
 components/tictactoe/TicTacToeRoom.tsx   Tic Tac Toe lobby, wooden board with walnut X / maple O pieces, rematch UI (all phases)
@@ -106,7 +116,7 @@ components/onw/roleInfo.ts       role labels/icons/descriptions shared across th
 components/ui/*                  button/card/badge/input primitives
 store/useGameStore.ts            Zustand client store (room, nickname, errors)
 lib/socketClient.ts              socket.io-client singleton
-types/game.ts                    shared client-side types — WerewolfRoomState | TicTacToeRoomState | OnwRoomState | KrakenRoomState union
+types/game.ts                    shared client-side types — WerewolfRoomState | TicTacToeRoomState | OnwRoomState | KrakenRoomState | InsiderRoomState union
 ```
 
 ## Notes / next steps

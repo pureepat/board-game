@@ -11,13 +11,15 @@ const {
   TIMER_MAX_SECONDS,
   ONW_ROLES,
   KRAKEN_MAX_PLAYERS,
+  INSIDER_MAX_PLAYERS,
 } = require("./lib/types");
-const { createRoom, addPlayer, getRoom, deleteRoom, findRoomBySocket } = require("./lib/rooms");
+const { PLAY_MODES, createRoom, addPlayer, getRoom, deleteRoom, findRoomBySocket } = require("./lib/rooms");
 const { getFilteredState } = require("./lib/stateFilter");
 const gl = require("./lib/gameLogic");
 const ttt = require("./lib/tictactoeLogic");
 const onw = require("./lib/onuwLogic");
 const kraken = require("./lib/krakenLogic");
+const insider = require("./lib/insiderLogic");
 
 const dev = process.env.NODE_ENV !== "production";
 const hostname = "localhost";
@@ -58,8 +60,11 @@ app.prepare().then(() => {
   }
 
   function schedulePhaseTimer(room, phase, onExpire) {
+    scheduleSeconds(room, room.timerConfig?.[phase], onExpire);
+  }
+
+  function scheduleSeconds(room, seconds, onExpire) {
     clearPhaseTimer(room);
-    const seconds = room.timerConfig?.[phase];
     if (!seconds || seconds <= 0) return;
     room.phaseEndsAt = Date.now() + seconds * 1000;
     const handle = setTimeout(() => {
@@ -188,11 +193,32 @@ app.prepare().then(() => {
     broadcastRoom(room);
   }
 
+  // --- Insider timers ----------------------------------------------------
+  // insiderLogic bumps ins.phaseSeq on every phase change and says how long
+  // the new phase lasts; schedule a countdown once per phaseSeq.
+  const insiderTimerSeq = new Map(); // room code -> phaseSeq already scheduled
+
+  function insiderSyncTimer(room) {
+    const ins = room.ins;
+    if (!ins) {
+      insiderTimerSeq.delete(room.code);
+      clearPhaseTimer(room);
+      return;
+    }
+    if (insiderTimerSeq.get(room.code) === ins.phaseSeq) return;
+    insiderTimerSeq.set(room.code, ins.phaseSeq);
+    scheduleSeconds(room, ins.phaseSeconds, () => {
+      insider.onTimeout(room);
+      insiderSyncTimer(room);
+      broadcastRoom(room);
+    });
+  }
+
   io.on("connection", (socket) => {
-    socket.on("create_room", ({ nickname, gameType }, cb) => {
+    socket.on("create_room", ({ nickname, gameType, playMode }, cb) => {
       if (!nickname || !nickname.trim()) return cb?.({ error: "Nickname required." });
       const resolvedType = Object.values(GAME_TYPES).includes(gameType) ? gameType : GAME_TYPES.WEREWOLF;
-      const room = createRoom(socket.id, nickname.trim(), resolvedType);
+      const room = createRoom(socket.id, nickname.trim(), resolvedType, playMode);
       socket.join(room.code);
       cb?.({ code: room.code, playerId: socket.id });
       broadcastRoom(room);
@@ -208,6 +234,9 @@ app.prepare().then(() => {
       }
       if (room.gameType === GAME_TYPES.FEED_THE_KRAKEN && Object.keys(room.players).length >= KRAKEN_MAX_PLAYERS) {
         return cb?.({ error: `Feed the Kraken rooms hold at most ${KRAKEN_MAX_PLAYERS} players.` });
+      }
+      if (room.gameType === GAME_TYPES.INSIDER && Object.keys(room.players).length >= INSIDER_MAX_PLAYERS) {
+        return cb?.({ error: `Insider rooms hold at most ${INSIDER_MAX_PLAYERS} players.` });
       }
       const taken = Object.values(room.players).some(
         (p) => p.nickname.toLowerCase() === nickname.trim().toLowerCase()
@@ -252,10 +281,18 @@ app.prepare().then(() => {
         }
       }
       if (room.gameType === GAME_TYPES.FEED_THE_KRAKEN) kraken.rekeyPlayer(room, playerId, socket.id);
+      if (room.gameType === GAME_TYPES.INSIDER) insider.rekeyPlayer(room, playerId, socket.id);
       clearTimeout(disconnectTimers.get(playerId));
       disconnectTimers.delete(playerId);
       socket.join(room.code);
       cb?.({ code: room.code, playerId: socket.id });
+      broadcastRoom(room);
+    });
+
+    socket.on("set_play_mode", ({ playMode } = {}) => {
+      const room = findRoomBySocket(socket.id);
+      if (!room || room.hostId !== socket.id || room.phase !== PHASES.LOBBY || !PLAY_MODES.includes(playMode)) return;
+      room.playMode = playMode;
       broadcastRoom(room);
     });
 
@@ -358,6 +395,16 @@ app.prepare().then(() => {
       if (room.gameType === GAME_TYPES.FEED_THE_KRAKEN) {
         const { error } = kraken.startGame(room);
         if (error) return cb?.({ error });
+        broadcastRoom(room);
+        return cb?.({ ok: true });
+      }
+
+      if (room.gameType === GAME_TYPES.INSIDER) {
+        if (room.phase !== PHASES.LOBBY) return cb?.({ error: "The game has already started." });
+        insider.startMatch(room);
+        const { error } = insider.startGame(room);
+        if (error) return cb?.({ error });
+        insiderSyncTimer(room);
         broadcastRoom(room);
         return cb?.({ ok: true });
       }
@@ -563,6 +610,102 @@ app.prepare().then(() => {
       broadcastRoom(room);
     });
 
+    // --- Insider ----------------------------------------------------------
+
+    function insiderRoom() {
+      const room = findRoomBySocket(socket.id);
+      return room && room.gameType === GAME_TYPES.INSIDER ? room : null;
+    }
+
+    socket.on("insider_set_timer", ({ seconds } = {}) => {
+      const room = insiderRoom();
+      if (!room || room.hostId !== socket.id || room.phase !== PHASES.LOBBY) return;
+      const { error } = insider.setQuestionSeconds(room, seconds);
+      if (error) return socket.emit("error_message", error);
+      broadcastRoom(room);
+    });
+
+    // Same shape as the Kraken handlers: run the logic, report errors to the
+    // sender only, otherwise reschedule the countdown and rebroadcast.
+    const insiderActions = {
+      ins_reroll: (room) => insider.rerollWords(room, socket.id),
+      ins_choose: (room, p) => insider.chooseWord(room, socket.id, p?.index),
+      ins_ask: (room, p) => insider.ask(room, socket.id, p?.text),
+      ins_answer: (room, p) => insider.answer(room, socket.id, p?.questionId, p?.answer),
+      ins_mark_correct: (room, p) => insider.markCorrect(room, socket.id, p?.playerId),
+      ins_vote1: (room, p) => insider.castVote1(room, socket.id, p?.yes),
+      ins_vote2: (room, p) => insider.castVote2(room, socket.id, p?.targetId),
+      // The Master or the host can cut the discussion short once everyone is ready.
+      ins_end_discussion: (room) =>
+        socket.id === room.hostId || socket.id === room.ins.masterId
+          ? insider.endDiscussion(room)
+          : { error: "Only the host or the Master can end the discussion." },
+      insider_force_advance: (room) =>
+        socket.id === room.hostId ? insider.forceAdvance(room) : { error: "Only the host can do that." },
+    };
+    for (const [eventName, run] of Object.entries(insiderActions)) {
+      socket.on(eventName, (payload) => {
+        const room = insiderRoom();
+        if (!room || !room.ins) return;
+        const { error } = run(room, payload) || {};
+        if (error) return socket.emit("error_message", error);
+        insiderSyncTimer(room);
+        broadcastRoom(room);
+      });
+    }
+
+    socket.on("insider_chat_message", ({ text } = {}) => {
+      const room = insiderRoom();
+      // Question time has its own feed (ins_ask); free chat opens once the word is found.
+      const open = [PHASES.INS_DISCUSS, PHASES.INS_VOTE1, PHASES.INS_VOTE2, PHASES.GAME_OVER];
+      if (!room || !open.includes(room.phase)) return;
+      const player = room.players[socket.id];
+      if (!player || !text || !text.trim()) return;
+      room.chat.push({
+        id: `${Date.now()}-${Math.random()}`,
+        from: socket.id,
+        nickname: player.nickname,
+        text: text.trim().slice(0, 300),
+        ts: Date.now(),
+      });
+      broadcastRoom(room);
+    });
+
+    socket.on("insider_set_rounds", ({ rounds } = {}) => {
+      const room = insiderRoom();
+      if (!room || room.hostId !== socket.id || room.phase !== PHASES.LOBBY) return;
+      const { error } = insider.setMatchRounds(room, rounds);
+      if (error) return socket.emit("error_message", error);
+      broadcastRoom(room);
+    });
+
+    // Before the first round (lobby) or between rounds (results screen).
+    socket.on("insider_set_master", ({ mode, playerId } = {}) => {
+      const room = insiderRoom();
+      if (!room || room.hostId !== socket.id || (room.phase !== PHASES.LOBBY && room.phase !== PHASES.GAME_OVER)) return;
+      const { error } = insider.setMasterPick(room, mode, playerId);
+      if (error) return socket.emit("error_message", error);
+      broadcastRoom(room);
+    });
+
+    // Mid-match: straight from one round's results into the next, no lobby.
+    socket.on("insider_next_round", () => {
+      const room = insiderRoom();
+      if (!room || room.hostId !== socket.id || room.phase !== PHASES.GAME_OVER || !room.insMatch) return;
+      const { error } = insider.startGame(room);
+      if (error) return socket.emit("error_message", error);
+      insiderSyncTimer(room);
+      broadcastRoom(room);
+    });
+
+    socket.on("insider_play_again", () => {
+      const room = insiderRoom();
+      if (!room || room.hostId !== socket.id || room.phase !== PHASES.GAME_OVER) return;
+      insider.resetToLobby(room);
+      insiderSyncTimer(room);
+      broadcastRoom(room);
+    });
+
     socket.on("wolf_chat_message", ({ text }) => {
       const room = findRoomBySocket(socket.id);
       if (!room || room.gameType !== GAME_TYPES.WEREWOLF || room.phase !== PHASES.NIGHT) return;
@@ -713,7 +856,7 @@ app.prepare().then(() => {
   // Explicit 0.0.0.0 bind (not just the default) so the intent — reachable
   // from other devices on the LAN, not just this machine — is unambiguous.
   httpServer.listen(port, "0.0.0.0", () => {
-    console.log(`> Werewolf server ready on http://localhost:${port}`);
+    console.log(`> PartyBros server ready on http://localhost:${port}`);
     console.log(`> On your LAN, other devices can reach it at http://<this-machine's-LAN-IP>:${port}`);
   });
 });
