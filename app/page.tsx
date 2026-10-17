@@ -3,7 +3,7 @@
 import { Suspense, useEffect, useState } from "react";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
-import { Moon, Grid3x3, ArrowLeft, DoorOpen, KeyRound, Zap, Anchor, BookOpen, MessageCircleQuestion } from "lucide-react";
+import { Moon, Grid3x3, ArrowLeft, DoorOpen, KeyRound, Zap, Anchor, BookOpen, MessageCircleQuestion, FolderSearch } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -22,9 +22,10 @@ const GAME_ICONS: Record<GameType, React.ElementType> = {
   ONE_NIGHT_WEREWOLF: Zap,
   FEED_THE_KRAKEN: Anchor,
   INSIDER: MessageCircleQuestion,
+  CS_FILES: FolderSearch,
 };
 
-const GAME_IDS: GameType[] = ["WEREWOLF", "TICTACTOE", "ONE_NIGHT_WEREWOLF", "FEED_THE_KRAKEN", "INSIDER"];
+const GAME_IDS: GameType[] = ["WEREWOLF", "TICTACTOE", "ONE_NIGHT_WEREWOLF", "FEED_THE_KRAKEN", "INSIDER", "CS_FILES"];
 
 export default function HomePage() {
   return (

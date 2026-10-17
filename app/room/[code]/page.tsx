@@ -14,7 +14,9 @@ import { TicTacToeRoom } from "@/components/tictactoe/TicTacToeRoom";
 import { OnwRoom } from "@/components/onw/OnwRoom";
 import { KrakenRoom } from "@/components/kraken/KrakenRoom";
 import { InsiderRoom } from "@/components/insider/InsiderRoom";
+import { CsRoom } from "@/components/csfiles/CsRoom";
 import { PlayModeChip, PlayModeLobbyBar, PlayModeProvider } from "@/components/table/PlayMode";
+import { CUE_GAMES, NightCues, NightCuesPanel } from "@/components/table/NightCues";
 import { Button } from "@/components/ui/button";
 import { LanguageSwitcher } from "@/components/LanguageSwitcher";
 import { useTranslation } from "@/lib/i18n/useTranslation";
@@ -112,6 +114,8 @@ export default function RoomPage() {
 
   const playMode = room.playMode ?? "online";
   const usesPlayMode = room.gameType !== "TICTACTOE";
+  // Vibration / narrator only matter when everyone sits together with eyes closed.
+  const usesCues = playMode === "local" && CUE_GAMES.includes(room.gameType);
 
   return (
     <PlayModeProvider mode={usesPlayMode ? playMode : "online"}>
@@ -140,6 +144,8 @@ export default function RoomPage() {
         {usesPlayMode && room.phase === "LOBBY" && (
           <PlayModeLobbyBar value={playMode} isHost={room.hostId === socket.id} socket={socket} />
         )}
+        {usesCues && room.phase === "LOBBY" && <NightCuesPanel isHost={room.hostId === socket.id} />}
+        <NightCues room={room} active={usesCues} />
 
         {room.gameType === "TICTACTOE" && <TicTacToeRoom room={room} socket={socket} />}
 
@@ -148,6 +154,8 @@ export default function RoomPage() {
         {room.gameType === "FEED_THE_KRAKEN" && <KrakenRoom room={room} socket={socket} />}
 
         {room.gameType === "INSIDER" && <InsiderRoom room={room} socket={socket} />}
+
+        {room.gameType === "CS_FILES" && <CsRoom room={room} socket={socket} />}
 
         {room.gameType === "WEREWOLF" && (
           <>

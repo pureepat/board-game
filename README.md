@@ -1,6 +1,6 @@
 # PartyBros
 
-Real-time multiplayer game room. Pick a game on the home page — classic Werewolf (Mafia) with an automated server-side moderator, One Night Ultimate Werewolf for a single fast round, Feed the Kraken for a ship full of suspects, Insider for a word hunt with a mole, or Tic Tac Toe for a quick 1v1 — then create or join a room by code.
+Real-time multiplayer game room. Pick a game on the home page — classic Werewolf (Mafia) with an automated server-side moderator, One Night Ultimate Werewolf for a single fast round, Feed the Kraken for a ship full of suspects, Insider for a word hunt with a mole, CS Files for a crime scene with a silent forensic expert, or Tic Tac Toe for a quick 1v1 — then create or join a room by code.
 
 ## Stack
 
@@ -66,9 +66,17 @@ Hidden information: `getKrakenView` reveals a role only to its owner, to fellow 
 
 Insider (`lib/insiderLogic.js`, word pool of ~350 Thai/English words in `lib/insiderWords.js`): 4–12 players (the box says 4–8; we allow up to 12). One public Master, one hidden Insider, the rest Commons. The host decides each round's Master in the lobby or on the results screen (`insider_set_master`): next in line (default), random, or a player they pick; a picked player who has left falls back to next in line. `INS_WORD` (the Master picks one of 3 words, or rerolls) → `INS_QUESTIONS` (host-set 3/5/7 min; askers type yes/no questions, the Master answers Yes / No / Don't know / Correct; typing the exact word in either language counts as a correct guess) → `INS_DISCUSS` (lasts as long as the search took, minimum 20 s, like flipping the sand timer) → `INS_VOTE1` (is the guesser the Insider? a strict majority of all players accuses them) → `INS_VOTE2` if not (everyone names a non-Master player; most votes is accused, ties broken by the guesser's vote, otherwise nobody) → `GAME_OVER`. Commons + Master win if the accused is the Insider, the Insider wins otherwise, and everyone loses if time runs out. Published sources disagree on vote details; the two-vote structure and guesser tie-break above are the version we picked. Every phase change bumps `ins.phaseSeq`; `server.js` schedules one countdown per sequence number and calls `onTimeout`. Scored matches (host picks 3/5/7/10 rounds in the lobby, `room.insMatch`): saying the word is +2, catching the Insider is +1 for everyone except the Insider (the Master included), an Insider who gets away scores +1, and a timeout scores nothing; the host moves straight to the next round from the results screen (`insider_next_round`) and the highest total after the last round wins (ties share the win). Standings and per-round gains are public. `getInsiderView` sends the word only to the Master and the Insider until it's guessed, the Insider's identity only to the Insider, and the second-vote ballots only at game over.
 
+CS Files (`lib/csLogic.js`, cards and tiles in `lib/csData.js`) is the Thai edition of Deception: Murder in Hong Kong, as taught in the GamesKradarn video, plus the Undercover Allies expansion roles: 4–14 players. One public Forensic Scientist (random or picked by the host) knows the solution but can't chat; everyone else gets 3–5 red Means and 3–5 blue Clue cards face up and one badge. `CS_NIGHT` (the Murderer picks one Means + one Clue of their own; Lab Technician tests one card; Rumormonger strips someone's badge) → `CS_CLUES` (Forensic picks one of 4 location tiles and puts one marker on each of 6 tiles) → `CS_DISCUSS` (host-set time) → `CS_PRESENT` (30 s per player, starting left of the Forensic) → `CS_REPLACE` (rounds 2–3: a new scene tile replaces an old one and gets a marker) → … Anyone with a badge can accuse at any time after the night (suspect + one red + one blue in front of them); wrong guesses burn the badge. A correct accusation wins for the investigators unless a Witness is in play and the Murderer then names them (`CS_WITNESS`). The Murderer's side wins after 3 rounds or when every investigator badge is gone. Roles follow the video's setup tables: Accomplice at 6+, Witness at 6+ (toggle), Lab Technician 7+, Rumormonger 8+, Bodyguard 7+ with a Witness (expansion toggles). **Our own choices**: all card and tile text is ours (not the box's), the Rumormonger is on the Murderer's side without knowing the Murderer (the video doesn't say), and Event tiles and the expansion's mystery location tiles aren't included. `getCsView` sends the solution only to the Forensic, Murderer and Accomplice; the Witness gets the two bad guys unordered; the Bodyguard gets the Witness; the Lab result goes only to the Lab Technician.
+
 ### Play mode: together or online
 
 Every room (except Tic Tac Toe) has `room.playMode`: `"local"` (everyone at the same table, the default) or `"online"`. It's picked on the create screen and the host can switch it in the lobby (`set_play_mode`); every view carries it. `components/table/PlayMode.tsx` provides it to the UI. In `local` mode chat boxes become a "just talk" panel (the wolves' night chat stays, since they can't whisper at the table), private info (role cards, Seer notes, the ONW night log, Kraken hand and secrets, the Insider word and the Master's word choices) sits behind a tap-to-peek cover that closes itself after a few seconds, and seat badges marked `secret` show as `•••` unless you're peeking. Insider changes its rules slightly: questions are asked out loud, and the Master taps whoever said the word (`ins_mark_correct`) instead of players typing.
+
+### Eyes-closed signals (together mode)
+
+In `local` mode, Werewolf, One Night and CS Files get night cues (`components/table/NightCues.tsx`, device helpers in `lib/nightCues.ts`), all driven client-side from room-state transitions (`deriveCue`): the phone of whoever must wake up buzzes 3 times (`navigator.vibrate`, Android only; iOS has no Vibration API), every phone gives one long buzz at dawn, and one device (the host's by default) reads the night out loud with the Web Speech API in the UI language. Buzzes are delayed a couple of seconds so they land with the spoken "...open your eyes". During a game the screen is kept on with the Screen Wake Lock API, which only works in a secure context (https:// or localhost), so a plain `http://<LAN-IP>:3000` link can let phones sleep through their cue. Settings are per device (`partybros-cues` in localStorage); the lobby panel's "Turn on and test" button supplies the tap browsers require before vibrating or speaking, and the floating pill re-arms it after a reload.
+
+Because the narrator is public, One Night in `local` mode calls every role in the deck (center cards included) and gives each step its full timer: skipping a role, or ending a step early, would tell the table which roles nobody holds. The "N remaining" count is hidden for the same reason.
 
 ### Reconnect handling
 
@@ -92,6 +100,11 @@ components/game/NightPhase.tsx   werewolf chat/vote, seer/doctor actions, villag
 components/game/DayPhase.tsx     announcement + timed discussion chat
 components/game/VotingPhase.tsx  lynch voting UI
 components/game/GameOver.tsx     win screen + play again
+lib/csLogic.js                   CS Files state machine: night, markers, discussion, presentations, accusations, witness hunt
+lib/csData.js                    CS Files means/clue cards and scene tiles (English + Thai, our own wording)
+components/csfiles/*             CS Files UI: CsRoom (router), CsLobby (settings + role preview), CsGame (scene tiles, case folders, actions, game over), csMeta
+components/table/NightCues.tsx    eyes-closed cues: vibration, narrator voice, keep-awake; deriveCue maps room changes to cues
+lib/nightCues.ts                 device helpers: vibrate, speech, Screen Wake Lock
 components/table/PlayMode.tsx      play-mode context, tap-to-peek SecretPeek, "just talk" panel, the together/online picker
 components/table/CampfireCircle.tsx  the campfire scene (night/day sky, fire, seats in a ring) shared by both Werewolf variants
 components/game/PlayerList.tsx   Werewolf village around the campfire (selectable for targeting, vote tallies)
@@ -116,7 +129,7 @@ components/onw/roleInfo.ts       role labels/icons/descriptions shared across th
 components/ui/*                  button/card/badge/input primitives
 store/useGameStore.ts            Zustand client store (room, nickname, errors)
 lib/socketClient.ts              socket.io-client singleton
-types/game.ts                    shared client-side types — WerewolfRoomState | TicTacToeRoomState | OnwRoomState | KrakenRoomState | InsiderRoomState union
+types/game.ts                    shared client-side types — WerewolfRoomState | TicTacToeRoomState | OnwRoomState | KrakenRoomState | InsiderRoomState | CsRoomState union
 ```
 
 ## Notes / next steps

@@ -1,4 +1,4 @@
-export type GameType = "WEREWOLF" | "TICTACTOE" | "ONE_NIGHT_WEREWOLF" | "FEED_THE_KRAKEN" | "INSIDER";
+export type GameType = "WEREWOLF" | "TICTACTOE" | "ONE_NIGHT_WEREWOLF" | "FEED_THE_KRAKEN" | "INSIDER" | "CS_FILES";
 
 export type Role = "VILLAGER" | "WEREWOLF" | "SEER" | "DOCTOR";
 
@@ -20,6 +20,12 @@ export type Phase =
   | "INS_DISCUSS"
   | "INS_VOTE1"
   | "INS_VOTE2"
+  | "CS_NIGHT"
+  | "CS_CLUES"
+  | "CS_DISCUSS"
+  | "CS_PRESENT"
+  | "CS_REPLACE"
+  | "CS_WITNESS"
   | "GAME_OVER";
 
 export interface RoleConfig {
@@ -180,7 +186,7 @@ export interface OnwRoomState {
   center: OnwCenterCard[];
   nightOrder: OnwRole[];
   currentStep: OnwRole | null;
-  pendingCount: number;
+  pendingCount: number | null;
   isMyTurn: boolean;
   myNightLog: OnwNightLogEntry[];
   deadPlayerIds: string[];
@@ -405,9 +411,105 @@ export interface InsiderGameState extends InsiderBase {
 
 export type InsiderRoomState = InsiderLobbyState | InsiderGameState;
 
+// --- CS Files ---------------------------------------------------------------
+
+export type CsRole = "FORENSIC" | "MURDERER" | "ACCOMPLICE" | "WITNESS" | "INVESTIGATOR" | "LAB_TECH" | "RUMORMONGER" | "BODYGUARD";
+export type CsTeam = "INVESTIGATORS" | "MURDERER";
+export interface CsText {
+  en: string;
+  th: string;
+}
+export interface CsCard extends CsText {
+  id: number;
+}
+export interface CsTile {
+  id: string;
+  title: CsText;
+  options: CsText[];
+}
+export interface CsConfig {
+  cards: number;
+  discussSeconds: number;
+  witness: boolean;
+  labTech: boolean;
+  rumormonger: boolean;
+  bodyguard: boolean;
+  forensicMode: "random" | "choose";
+  forensicId: string | null;
+}
+
+interface CsBase {
+  gameType: "CS_FILES";
+  code: string;
+  phase: Phase;
+  hostId: string;
+  winner: "INVESTIGATORS" | "MURDERER" | null;
+  chat: ChatMessage[];
+  config: CsConfig;
+}
+
+export interface CsLobbyState extends CsBase {
+  players: { id: string; nickname: string; connected: boolean; isHost: boolean; isSelf: boolean }[];
+  lobby: { min: number; max: number; roles: CsRole[] };
+  you: { id: string; isHost: boolean } | null;
+}
+
+export interface CsPlayer {
+  id: string;
+  nickname: string;
+  connected: boolean;
+  isHost: boolean;
+  isSelf: boolean;
+  role: CsRole | null;
+  isForensic: boolean;
+  badge: boolean | null;
+  means: CsCard[];
+  clues: CsCard[];
+}
+
+export interface CsAccusation {
+  by: string;
+  target: string;
+  means: CsCard;
+  clue: CsCard;
+  correct: boolean;
+  round: number;
+}
+
+export interface CsGameState extends CsBase {
+  players: CsPlayer[];
+  phaseEndsAt: number | null;
+  phaseSeconds: number;
+  round: number;
+  rounds: number;
+  forensicId: string;
+  tiles: ({ tile: CsTile; marker: number | null; fresh: boolean } | null)[];
+  locationOptions: CsTile[] | null;
+  pendingTile: CsTile | null;
+  speakerId: string | null;
+  speakers: string[];
+  accusations: CsAccusation[];
+  rumorTarget: string | null;
+  witnessGuess: string | null;
+  reason: "solved" | "witness" | "badges" | "unsolved" | null;
+  solution: { murdererId: string; means: CsCard; clue: CsCard } | null;
+  you: {
+    id: string;
+    isHost: boolean;
+    role: CsRole | null;
+    team: CsTeam | null;
+    nightTodo: { murder: boolean; lab: boolean; rumor: boolean } | null;
+    suspects: string[] | null;
+    witnessId: string | null;
+    labResult: { playerId: string; kind: "means" | "clue"; card: CsCard; hit: boolean } | null;
+  } | null;
+}
+
+export type CsRoomState = CsLobbyState | CsGameState;
+
 export type PlayMode = "local" | "online";
 
 // Every view carries the room's play mode (added in lib/stateFilter.js getFilteredState).
-export type RoomState = (WerewolfRoomState | TicTacToeRoomState | OnwRoomState | KrakenRoomState | InsiderRoomState) & {
+export type RoomState = (WerewolfRoomState | TicTacToeRoomState | OnwRoomState | KrakenRoomState | InsiderRoomState | CsRoomState) & {
   playMode: PlayMode;
 };

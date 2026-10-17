@@ -94,7 +94,9 @@ export function OnwNight({ room, socket }: { room: OnwRoomState; socket: Socket 
             ) : (
               <p className="text-moon-400 text-sm text-center py-4">
                 {room.currentStep
-                  ? t("onw.night.waitingOn", { role: t(`onw.roles.${room.currentStep}.label`), count: room.pendingCount })
+                  ? room.pendingCount === null
+                    ? t("onw.night.waitingOnRole", { role: t(`onw.roles.${room.currentStep}.label`) })
+                    : t("onw.night.waitingOn", { role: t(`onw.roles.${room.currentStep}.label`), count: room.pendingCount })
                   : t("onw.night.waitingResolve")}
               </p>
             )}

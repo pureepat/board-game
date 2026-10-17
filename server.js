@@ -12,6 +12,7 @@ const {
   ONW_ROLES,
   KRAKEN_MAX_PLAYERS,
   INSIDER_MAX_PLAYERS,
+  CS_MAX_PLAYERS,
 } = require("./lib/types");
 const { PLAY_MODES, createRoom, addPlayer, getRoom, deleteRoom, findRoomBySocket } = require("./lib/rooms");
 const { getFilteredState } = require("./lib/stateFilter");
@@ -20,6 +21,7 @@ const ttt = require("./lib/tictactoeLogic");
 const onw = require("./lib/onuwLogic");
 const kraken = require("./lib/krakenLogic");
 const insider = require("./lib/insiderLogic");
+const cs = require("./lib/csLogic");
 
 const dev = process.env.NODE_ENV !== "production";
 const hostname = "localhost";
@@ -214,6 +216,26 @@ app.prepare().then(() => {
     });
   }
 
+  // --- CS Files timers ---------------------------------------------------
+  // Same scheme as Insider: one countdown per cs.phaseSeq.
+  const csTimerSeq = new Map();
+
+  function csSyncTimer(room) {
+    const state = room.cs;
+    if (!state) {
+      csTimerSeq.delete(room.code);
+      clearPhaseTimer(room);
+      return;
+    }
+    if (csTimerSeq.get(room.code) === state.phaseSeq) return;
+    csTimerSeq.set(room.code, state.phaseSeq);
+    scheduleSeconds(room, state.phaseSeconds, () => {
+      cs.onTimeout(room);
+      csSyncTimer(room);
+      broadcastRoom(room);
+    });
+  }
+
   io.on("connection", (socket) => {
     socket.on("create_room", ({ nickname, gameType, playMode }, cb) => {
       if (!nickname || !nickname.trim()) return cb?.({ error: "Nickname required." });
@@ -237,6 +259,9 @@ app.prepare().then(() => {
       }
       if (room.gameType === GAME_TYPES.INSIDER && Object.keys(room.players).length >= INSIDER_MAX_PLAYERS) {
         return cb?.({ error: `Insider rooms hold at most ${INSIDER_MAX_PLAYERS} players.` });
+      }
+      if (room.gameType === GAME_TYPES.CS_FILES && Object.keys(room.players).length >= CS_MAX_PLAYERS) {
+        return cb?.({ error: `CS Files rooms hold at most ${CS_MAX_PLAYERS} players.` });
       }
       const taken = Object.values(room.players).some(
         (p) => p.nickname.toLowerCase() === nickname.trim().toLowerCase()
@@ -282,6 +307,7 @@ app.prepare().then(() => {
       }
       if (room.gameType === GAME_TYPES.FEED_THE_KRAKEN) kraken.rekeyPlayer(room, playerId, socket.id);
       if (room.gameType === GAME_TYPES.INSIDER) insider.rekeyPlayer(room, playerId, socket.id);
+      if (room.gameType === GAME_TYPES.CS_FILES) cs.rekeyPlayer(room, playerId, socket.id);
       clearTimeout(disconnectTimers.get(playerId));
       disconnectTimers.delete(playerId);
       socket.join(room.code);
@@ -395,6 +421,15 @@ app.prepare().then(() => {
       if (room.gameType === GAME_TYPES.FEED_THE_KRAKEN) {
         const { error } = kraken.startGame(room);
         if (error) return cb?.({ error });
+        broadcastRoom(room);
+        return cb?.({ ok: true });
+      }
+
+      if (room.gameType === GAME_TYPES.CS_FILES) {
+        if (room.phase !== PHASES.LOBBY) return cb?.({ error: "The game has already started." });
+        const { error } = cs.startGame(room);
+        if (error) return cb?.({ error });
+        csSyncTimer(room);
         broadcastRoom(room);
         return cb?.({ ok: true });
       }
@@ -703,6 +738,74 @@ app.prepare().then(() => {
       if (!room || room.hostId !== socket.id || room.phase !== PHASES.GAME_OVER) return;
       insider.resetToLobby(room);
       insiderSyncTimer(room);
+      broadcastRoom(room);
+    });
+
+    // --- CS Files ---------------------------------------------------------
+
+    function csRoom() {
+      const room = findRoomBySocket(socket.id);
+      return room && room.gameType === GAME_TYPES.CS_FILES ? room : null;
+    }
+
+    socket.on("cs_set_config", (patch = {}) => {
+      const room = csRoom();
+      if (!room || room.hostId !== socket.id || room.phase !== PHASES.LOBBY) return;
+      const { error } = cs.setConfig(room, patch);
+      if (error) return socket.emit("error_message", error);
+      broadcastRoom(room);
+    });
+
+    const csActions = {
+      cs_murder: (room, p) => cs.murderChoose(room, socket.id, p?.means, p?.clue),
+      cs_lab: (room, p) => cs.labPick(room, socket.id, p?.playerId, p?.kind, p?.index),
+      cs_rumor: (room, p) => cs.rumorPick(room, socket.id, p?.targetId),
+      cs_location: (room, p) => cs.pickLocation(room, socket.id, p?.index),
+      cs_marker: (room, p) => cs.placeMarker(room, socket.id, p?.slot, p?.option),
+      cs_replace: (room, p) => cs.replaceTile(room, socket.id, p?.slot, p?.option),
+      // The Forensic Scientist keeps time, so they (or the host) end the discussion.
+      cs_end_discussion: (room) =>
+        socket.id === room.hostId || socket.id === room.cs.forensicId
+          ? cs.endDiscussion(room)
+          : { error: "Only the host or the Forensic Scientist can do that." },
+      cs_done_speaking: (room) => cs.doneSpeaking(room, socket.id),
+      cs_accuse: (room, p) => cs.accuse(room, socket.id, p?.targetId, p?.means, p?.clue),
+      cs_witness_guess: (room, p) => cs.witnessGuess(room, socket.id, p?.targetId),
+      cs_force_advance: (room) => (socket.id === room.hostId ? cs.forceAdvance(room) : { error: "Only the host can do that." }),
+    };
+    for (const [eventName, run] of Object.entries(csActions)) {
+      socket.on(eventName, (payload) => {
+        const room = csRoom();
+        if (!room || !room.cs) return;
+        const { error } = run(room, payload) || {};
+        if (error) return socket.emit("error_message", error);
+        csSyncTimer(room);
+        broadcastRoom(room);
+      });
+    }
+
+    socket.on("cs_chat_message", ({ text } = {}) => {
+      const room = csRoom();
+      if (!room || !room.cs || room.phase === PHASES.CS_NIGHT) return;
+      const player = room.players[socket.id];
+      if (!player || !text || !text.trim()) return;
+      // The Forensic Scientist may not speak until the case is closed.
+      if (socket.id === room.cs.forensicId && room.phase !== PHASES.GAME_OVER) return;
+      room.chat.push({
+        id: `${Date.now()}-${Math.random()}`,
+        from: socket.id,
+        nickname: player.nickname,
+        text: text.trim().slice(0, 300),
+        ts: Date.now(),
+      });
+      broadcastRoom(room);
+    });
+
+    socket.on("cs_play_again", () => {
+      const room = csRoom();
+      if (!room || room.hostId !== socket.id || room.phase !== PHASES.GAME_OVER) return;
+      cs.resetToLobby(room);
+      csSyncTimer(room);
       broadcastRoom(room);
     });
 

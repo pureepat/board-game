@@ -1,4 +1,5 @@
-import { Anchor, Grid3x3, MessageCircleQuestion, Moon, Zap } from "lucide-react";
+import { Anchor, FolderSearch, Grid3x3, MessageCircleQuestion, Moon, Zap } from "lucide-react";
+import { CS_ROLE_META } from "@/components/csfiles/csMeta";
 import { WEREWOLF_ROLE_META } from "@/components/game/roleMeta";
 import { ONW_ROLE_META, ONW_ROLE_ORDER } from "@/components/onw/roleInfo";
 import { INS_ROLE_META } from "@/components/insider/insiderMeta";
@@ -29,6 +30,7 @@ export interface GameGuide {
 
 const WEREWOLF_ROLES = ["WEREWOLF", "SEER", "DOCTOR", "VILLAGER"];
 const INSIDER_ROLES = ["MASTER", "INSIDER", "COMMON"] as const;
+const CS_ROLES = ["FORENSIC", "MURDERER", "ACCOMPLICE", "WITNESS", "INVESTIGATOR", "LAB_TECH", "RUMORMONGER", "BODYGUARD"] as const;
 const KRAKEN_ROLES = ["SAILOR", "PIRATE", "CULT_LEADER", "CULTIST"] as const;
 const KRAKEN_EFFECTS = ["DRUNK", "MERMAID", "TELESCOPE", "ARMED", "DISARMED", "CULT_UPRISING"] as const;
 const KRAKEN_ACTIONS = ["CABIN_SEARCH", "FLOGGING", "OFF_WITH_TONGUE", "FEED_THE_KRAKEN"] as const;
@@ -131,6 +133,23 @@ export const GAME_GUIDES: GameGuide[] = [
           color: r === "MASTER" ? "text-amber-400" : r === "INSIDER" ? "text-violet-400" : "text-moon-300",
           labelKey: `insider.roles.${r}.label`,
           descKey: `insider.roles.${r}.desc`,
+        })),
+      },
+    ],
+  },
+  {
+    id: "CS_FILES",
+    icon: FolderSearch,
+    ruleKeys: [1, 2, 3, 4, 5, 6, 7].map((n) => `csfiles.lobby.rule${n}`),
+    sections: [
+      {
+        titleKey: "guide.roles",
+        items: CS_ROLES.map((r) => ({
+          id: r,
+          icon: CS_ROLE_META[r].icon,
+          color: "text-moon-200",
+          labelKey: `csfiles.roles.${r}.label`,
+          descKey: `csfiles.roles.${r}.desc`,
         })),
       },
     ],
