@@ -1,0 +1,15 @@
+# Render Blueprint: one always-on Node web service running the custom
+# Socket.io server (server.js), which also serves the Next.js app.
+# Rooms live in memory, so keep this at a single instance.
+services:
+  - type: web
+    name: partybros
+    runtime: node
+    plan: free
+    buildCommand: npm install && npm run build
+    startCommand: npm start
+    healthCheckPath: /
+    autoDeploy: true
+    envVars:
+      - key: NODE_VERSION
+        value: "20"
